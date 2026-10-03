@@ -31,6 +31,10 @@ const INITIAL_NOTES = [
     { id: 4, text: "Ask the canteen vendor first 🤝", author: "Peer Idea", votes: 11, rotation: "-rotate-2", themeIdx: 3 }
 ];
 
+/* ✅ Email validation helpers */
+const GENERAL_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const GMAIL_EMAIL_REGEX = /^[ts]\.[a-zA-Z0-9][a-zA-Z0-9._%+-]*@gmail\.com$/;
+
 export default function Login({ onLogin }) {
     const [authMode, setAuthMode] = useState('signin');
     const [notes, setNotes] = useState(INITIAL_NOTES);
@@ -66,16 +70,52 @@ export default function Login({ onLogin }) {
         showToast("Idea posted to board!");
     };
 
+    /* ✅ Validate email — proper Gmail + role prefix */
+    const validateEmail = (rawEmail) => {
+        const email = rawEmail.trim().toLowerCase();
+
+        if (!email) return { ok: false, msg: "Please enter your email address." };
+
+        if (!GENERAL_EMAIL_REGEX.test(email)) {
+            return { ok: false, msg: "Please enter a valid email address (e.g. name@gmail.com)." };
+        }
+
+        // Must be a Gmail address
+        if (!email.endsWith('@gmail.com')) {
+            return { ok: false, msg: "Email must be a Gmail address ending with '@gmail.com'." };
+        }
+
+        // Local part before @
+        const localPart = email.split('@')[0];
+
+        // Must start with 't.' (teacher) or 's.' (student)
+        if (!localPart.startsWith('t.') && !localPart.startsWith('s.')) {
+            return { ok: false, msg: "Email must start with 't.' for Teacher or 's.' for Student (e.g. t.ahmed@gmail.com)." };
+        }
+
+        // Full pattern check: t.<something>@gmail.com or s.<something>@gmail.com
+        if (!GMAIL_EMAIL_REGEX.test(email)) {
+            return { ok: false, msg: "Email format is invalid. Use 't.name@gmail.com' or 's.name@gmail.com' with only letters, numbers, dots, +, -, or _." };
+        }
+
+        return { ok: true, email, role: localPart.startsWith('t.') ? 'teacher' : 'student' };
+    };
+
     // 🔥 FIREBASE AUTH LOGIC
     const handleSubmit = async (e) => {
         e.preventDefault();
-        const cleanEmail = email.trim().toLowerCase();
-        let role = null;
 
-        // ✅ New email format: t.name@gmail.com (teacher) | s.name@gmail.com (student)
-        if (cleanEmail.startsWith('t.')) role = 'teacher';
-        else if (cleanEmail.startsWith('s.')) role = 'student';
-        else return showToast("Email 't.name@gmail.com' ya 's.name@gmail.com' format mein honi chahiye!", 'error');
+        const validation = validateEmail(email);
+        if (!validation.ok) {
+            return showToast(validation.msg, 'error');
+        }
+
+        const cleanEmail = validation.email;
+        const role = validation.role;
+
+        if (password.length < 6) {
+            return showToast("Password must be at least 6 characters long.", 'error');
+        }
 
         setLoading(true);
         try {
@@ -109,9 +149,10 @@ export default function Login({ onLogin }) {
         } catch (err) {
             console.error(err);
             let errorMsg = err.message;
-            if (err.code === 'auth/email-already-in-use') errorMsg = "Yeh email pehle se registered hai! Sign In karo.";
-            if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') errorMsg = "Email ya password galat hai!";
-            if (err.code === 'auth/weak-password') errorMsg = "Password kam se kam 6 characters ka hona chahiye.";
+            if (err.code === 'auth/email-already-in-use') errorMsg = "This email is already registered. Please sign in instead.";
+            if (err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found' || err.code === 'auth/invalid-credential') errorMsg = "Incorrect email or password.";
+            if (err.code === 'auth/weak-password') errorMsg = "Password must be at least 6 characters long.";
+            if (err.code === 'auth/invalid-email') errorMsg = "The email address is not valid.";
 
             showToast(errorMsg, 'error');
         } finally {
