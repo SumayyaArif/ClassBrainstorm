@@ -113,6 +113,8 @@ export default function App() {
   const [teacherProblemDesc, setTeacherProblemDesc] = useState('');
   const [teacherProblemDeadline, setTeacherProblemDeadline] = useState('');
   const [teacherProblemPeerVisible, setTeacherProblemPeerVisible] = useState(true);
+  // 🆕 Share problem with all teachers (view only)
+  const [teacherProblemShared, setTeacherProblemShared] = useState(false);
   const [showTeacherModal, setShowTeacherModal] = useState(false);
   const [teacherTab, setTeacherTab] = useState('dashboard');
 
@@ -216,15 +218,18 @@ export default function App() {
   const currentStudent = students.find(s => s.id === currentStudentId) || null;
   const currentGroup = groups.find(g => g.id === currentStudent?.groupId) || null;
 
+  // 🆕 FIX: Only ONE teacher exists (t.teacher@gmail.com) — they own every problem
+  const isProblemOwner = (prob) => role === 'teacher';
+
+  // 🆕 FIX: Teacher sees ALL problems — same as students.
   const visibleProblems = useMemo(() => {
-    if (role === 'teacher' && currentUser) {
-      return problems.filter(p => !p.teacherId || p.teacherId === currentUser.uid);
-    }
     return problems;
-  }, [problems, role, currentUser]);
+  }, [problems]);
 
   const activeProblem = visibleProblems.find(p => p.id === selectedProblemId) || visibleProblems[0] || problems[0];
   const studentsCanSeeEachOther = activeProblem?.peerResponsesVisible !== false;
+  // 🆕 Can the current teacher manage (edit/review) the active problem?
+  const canManageActiveProblem = role === 'teacher' && isProblemOwner(activeProblem);
 
   const leaderboardData = useMemo(() => {
     return [...students].map(s => {
@@ -448,7 +453,10 @@ export default function App() {
       commentsCount: (currentStudent.commentsCount || 0) + 1,
       lastActive: 'Just now', attemptedProblems, problemsAttempted, ...streakUpdate
     });
-    await addNotification(`❓ ${currentUser?.name || currentStudent.name} asked a question`, { audience: 'teachers' });
+    await addNotification(`❓ ${currentUser?.name || currentStudent.name} asked a question`, {
+      audience: 'teacher',
+      teacherId: activeProblem.teacherId || null
+    });
     setNewProbCommentText('');
   };
 
@@ -473,7 +481,10 @@ export default function App() {
       lastActive: 'Just now', attemptedProblems, problemsAttempted, ...streakUpdate
     });
     const visibilityNote = newIdeaVisibility === 'teacher' ? ' (Teacher only 🔒)' : '';
-    await addNotification(`💡 ${currentUser?.name || currentStudent.name} posted a new idea${visibilityNote}`, { audience: 'teachers' });
+    await addNotification(`💡 ${currentUser?.name || currentStudent.name} posted a new idea${visibilityNote}`, {
+      audience: 'teacher',
+      teacherId: activeProblem.teacherId || null
+    });
     showPopup(
       newIdeaVisibility === 'teacher' ? '🔒 Private Idea Posted' : '💡 New Idea Posted',
       `${currentUser?.name || currentStudent.name}: "${newIdeaContent.slice(0, 60)}${newIdeaContent.length > 60 ? '…' : ''}"`,
@@ -536,6 +547,12 @@ export default function App() {
 
   const handleToggleIdeaVisibility = async (ideaId) => {
     const idea = ideas.find(i => i.id === ideaId);
+    if (!idea) return;
+    const prob = problems.find(p => p.id === idea.problemId);
+    if (prob && !isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can hide/show opinions.', 'teacher');
+      return;
+    }
     const currentlyHidden = idea?.visibleToStudents === false;
     const willBeVisible = currentlyHidden;
     await updateItem('ideas', ideaId, { visibleToStudents: willBeVisible });
@@ -567,19 +584,46 @@ export default function App() {
   const handleToggleStudentsVisibility = async (probId) => {
     const prob = problems.find(p => p.id === probId);
     if (!prob) return;
+    if (!isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can change visibility.', 'teacher');
+      return;
+    }
     const currentlyVisible = prob.peerResponsesVisible !== false;
     const willBeVisible = !currentlyVisible;
     await updateItem('problems', probId, { peerResponsesVisible: willBeVisible });
     showPopup(willBeVisible ? '👁️ Visible' : '🙈 Hidden', `${prob.title}`, 'teacher');
   };
 
+  const handleToggleProblemShare = async (probId) => {
+    const prob = problems.find(p => p.id === probId);
+    if (!prob) return;
+    if (!isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can change sharing settings.', 'teacher');
+      return;
+    }
+    const willShare = !prob.sharedWithTeachers;
+    await updateItem('problems', probId, { sharedWithTeachers: willShare });
+    showPopup(
+      willShare ? '🌍 Shared with All Teachers' : '🔒 Sharing Turned Off',
+      willShare
+        ? `"${prob.title}" is now visible to all teachers (view-only). Only you can review it.`
+        : `"${prob.title}" is now private to you again.`,
+      'teacher'
+    );
+  };
+
   const handleSaveProblem = async (e) => {
     e.preventDefault();
     if (!teacherProblemTitle.trim()) return;
     if (editingProblem) {
+      if (!isProblemOwner(editingProblem)) {
+        showPopup('🔒 Not Allowed', 'Only the problem creator can edit this.', 'teacher');
+        return;
+      }
       await updateItem('problems', editingProblem.id, {
         title: teacherProblemTitle, description: teacherProblemDesc,
-        deadline: teacherProblemDeadline, peerResponsesVisible: teacherProblemPeerVisible
+        deadline: teacherProblemDeadline, peerResponsesVisible: teacherProblemPeerVisible,
+        sharedWithTeachers: teacherProblemShared
       });
       setEditingProblem(null);
     } else {
@@ -590,6 +634,7 @@ export default function App() {
         createdTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         deadline: teacherProblemDeadline || '2026-12-31T23:59',
         peerResponsesVisible: teacherProblemPeerVisible,
+        sharedWithTeachers: teacherProblemShared,
         teacherId: currentUser?.uid || null,
         teacherName: currentUser?.name || 'Teacher'
       });
@@ -601,10 +646,17 @@ export default function App() {
     setTeacherProblemDesc('');
     setTeacherProblemDeadline('');
     setTeacherProblemPeerVisible(true);
+    setTeacherProblemShared(false);
     setShowTeacherModal(false);
   };
 
   const handleDeleteProblem = async (probId) => {
+    const prob = problems.find(p => p.id === probId);
+    if (!prob) return;
+    if (!isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can delete this.', 'teacher');
+      return;
+    }
     if (confirm("Are you sure you want to delete this problem?")) {
       await deleteItem('problems', probId);
       if (selectedProblemId === probId && problems.length > 1) setSelectedProblemId(problems.find(p => p.id !== probId).id);
@@ -613,23 +665,40 @@ export default function App() {
   };
 
   const handleEditProblemClick = (prob) => {
+    if (!isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can edit this.', 'teacher');
+      return;
+    }
     setEditingProblem(prob);
     setTeacherProblemTitle(prob.title);
     setTeacherProblemDesc(prob.description);
     setTeacherProblemDeadline(prob.deadline || '');
     setTeacherProblemPeerVisible(prob.peerResponsesVisible !== false);
+    setTeacherProblemShared(prob.sharedWithTeachers === true);
     setShowTeacherModal(true);
   };
 
   const handleRateIdea = async (ideaId, rating) => {
-    await updateItem('ideas', ideaId, { rating });
     const idea = ideas.find(i => i.id === ideaId);
+    if (!idea) return;
+    const prob = problems.find(p => p.id === idea.problemId);
+    if (prob && !isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can rate ideas.', 'teacher');
+      return;
+    }
+    await updateItem('ideas', ideaId, { rating });
     if (idea) await addNotification(`⭐ Your idea got ${rating}★ rating`, { audience: 'student', studentId: idea.studentId });
   };
 
   const handleSetBadge = async (ideaId, badge) => {
-    await updateItem('ideas', ideaId, { badge });
     const idea = ideas.find(i => i.id === ideaId);
+    if (!idea) return;
+    const prob = problems.find(p => p.id === idea.problemId);
+    if (prob && !isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can award badges.', 'teacher');
+      return;
+    }
+    await updateItem('ideas', ideaId, { badge });
     if (badge && idea) {
       await addNotification(`🏆 You got a badge: "${badge}"`, { audience: 'student', studentId: idea.studentId });
       showPopup('🏆 Badge Awarded', `${idea?.studentName || 'A student'}'s idea got "${badge}"`, 'teacher');
@@ -637,6 +706,14 @@ export default function App() {
   };
 
   const handleBulkRateCluster = async (cluster, rating) => {
+    const firstIdea = cluster.items[0];
+    if (firstIdea) {
+      const prob = problems.find(p => p.id === firstIdea.problemId);
+      if (prob && !isProblemOwner(prob)) {
+        showPopup('🔒 Not Allowed', 'Only the problem creator can rate ideas.', 'teacher');
+        return;
+      }
+    }
     for (const idea of cluster.items) {
       await updateItem('ideas', idea.id, { rating });
       await addNotification(`⭐ Your idea got ${rating}★ rating`, { audience: 'student', studentId: idea.studentId });
@@ -645,6 +722,14 @@ export default function App() {
   };
 
   const handleBulkBadgeCluster = async (cluster, badge) => {
+    const firstIdea = cluster.items[0];
+    if (firstIdea) {
+      const prob = problems.find(p => p.id === firstIdea.problemId);
+      if (prob && !isProblemOwner(prob)) {
+        showPopup('🔒 Not Allowed', 'Only the problem creator can award badges.', 'teacher');
+        return;
+      }
+    }
     for (const idea of cluster.items) {
       await updateItem('ideas', idea.id, { badge });
       if (badge) await addNotification(`🏆 You got a badge: "${badge}"`, { audience: 'student', studentId: idea.studentId });
@@ -657,6 +742,11 @@ export default function App() {
   const getDevelopment = (ideaId) => developments.find(d => d.ideaId === ideaId);
 
   const handleOpenDevelop = (idea) => {
+    const prob = problems.find(p => p.id === idea.problemId);
+    if (prob && !isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can assign tasks.', 'teacher');
+      return;
+    }
     const existing = getDevelopment(idea.id);
     setDevelopIdea(idea);
     setDevStage(existing?.stage || 'shortlisted');
@@ -669,6 +759,11 @@ export default function App() {
   const handleSaveDevelopment = async (e) => {
     e.preventDefault();
     if (!developIdea) return;
+    const prob = problems.find(p => p.id === developIdea.problemId);
+    if (prob && !isProblemOwner(prob)) {
+      showPopup('🔒 Not Allowed', 'Only the problem creator can assign tasks.', 'teacher');
+      return;
+    }
     const group = groups.find(g => g.id === devGroupId);
     const payload = {
       ideaId: developIdea.id, stage: devStage, note: devNote,
@@ -708,9 +803,16 @@ export default function App() {
   const handleReplyToIdea = async (ideaId) => {
     const reply = replyTextMap[ideaId];
     if (!reply || !reply.trim()) return;
+    const idea = ideas.find(i => i.id === ideaId);
+    if (idea) {
+      const prob = problems.find(p => p.id === idea.problemId);
+      if (prob && !isProblemOwner(prob)) {
+        showPopup('🔒 Not Allowed', 'Only the problem creator can reply to ideas.', 'teacher');
+        return;
+      }
+    }
     await updateItem('ideas', ideaId, { teacherReply: reply });
     setReplyTextMap({ ...replyTextMap, [ideaId]: '' });
-    const idea = ideas.find(i => i.id === ideaId);
     if (idea) await addNotification(`💬 Teacher replied to your idea`, { audience: 'student', studentId: idea.studentId });
     showPopup('✅ Teacher Replied to an Idea', reply, 'teacher');
   };
@@ -718,9 +820,16 @@ export default function App() {
   const handleReplyToComment = async (commentId) => {
     const reply = replyTextMap[commentId];
     if (!reply || !reply.trim()) return;
+    const comment = problemComments.find(c => c.id === commentId);
+    if (comment) {
+      const prob = problems.find(p => p.id === comment.problemId);
+      if (prob && !isProblemOwner(prob)) {
+        showPopup('🔒 Not Allowed', 'Only the problem creator can reply to questions.', 'teacher');
+        return;
+      }
+    }
     await updateItem('problemComments', commentId, { teacherReply: reply });
     setReplyTextMap({ ...replyTextMap, [commentId]: '' });
-    const comment = problemComments.find(c => c.id === commentId);
     if (comment) await addNotification(`💬 Teacher replied to your question`, { audience: 'student', studentId: comment.studentId });
     showPopup('✅ Teacher Replied', reply, 'teacher');
   };
@@ -744,7 +853,11 @@ export default function App() {
     if (comment && comment.studentId !== currentStudentId) {
       await addNotification(`💬 ${currentUser?.name || currentStudent.name} replied to your question`, { audience: 'student', studentId: comment.studentId });
     }
-    await addNotification(`💬 ${currentUser?.name || currentStudent.name} replied to a classmate`, { audience: 'teachers' });
+    const probOfComment = problems.find(p => p.id === (comment?.problemId || activeProblem?.id));
+    await addNotification(`💬 ${currentUser?.name || currentStudent.name} replied to a classmate`, {
+      audience: 'teacher',
+      teacherId: probOfComment?.teacherId || null
+    });
     setNewStudentReplyMap({ ...newStudentReplyMap, [commentId]: '' });
   };
 
@@ -837,7 +950,6 @@ export default function App() {
       return s ? `${s.emoji} ${s.label}` : '—';
     };
 
-    // ===== Helpers used by the extended teacher-insight sheets =====
     const nowMs = Date.now();
     const taskStatusOf = (d) => {
       if (d.stage === 'implemented') return { key: 'done', label: '✅ Completed', daysLeft: '—' };
@@ -854,7 +966,6 @@ export default function App() {
       return idx < 0 ? 0 : Math.round(((idx + 1) / DEVELOPMENT_STAGES.length) * 100);
     };
 
-    // SHEET 1: OVERVIEW
     const totalIdeasCount = ideas.length;
     const totalVotesCount = ideas.reduce((s, i) => s + (i.votes || 0), 0);
     const ratedIdeasCount = ideas.filter(i => i.rating > 0).length;
@@ -889,7 +1000,6 @@ export default function App() {
       { Section: '💬 DISCUSSIONS', Item: 'Comments on Ideas', Details: totalIdeaComments },
       { Section: '📢 ANNOUNCEMENTS', Item: 'Total Announcements', Details: announcements.length },
     ];
-    // ➕ Extra teacher-insight rows
     overviewRows.push(
       { Section: '🚀 TASKS', Item: 'Completed Tasks (Implemented)', Details: developments.filter(d => taskStatusOf(d).key === 'done').length },
       { Section: '🚀 TASKS', Item: 'In-Progress Tasks', Details: developments.filter(d => taskStatusOf(d).key !== 'done').length },
@@ -901,7 +1011,6 @@ export default function App() {
     );
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(overviewRows), '📊 Overview');
 
-    // SHEET 2: PROBLEMS
     const problemRows = visibleProblems.map((p, idx) => {
       const pIdeas = ideas.filter(i => i.problemId === p.id);
       const pClusters = clusteredIdeasByProblem[p.id] || [];
@@ -913,18 +1022,19 @@ export default function App() {
         'Created Time': p.createdTime || '—',
         'Deadline': p.deadline ? new Date(p.deadline).toLocaleString() : 'No Deadline',
         'Students Can See Each Other': p.peerResponsesVisible !== false ? 'Yes 👁️' : 'No 🔒',
+        'Shared With All Teachers': p.sharedWithTeachers ? 'Yes 🌍' : 'No 🔒',
         'Total Ideas': pIdeas.length,
         'Total Clusters': pClusters.length,
         'Similar Clusters': pClusters.filter(c => c.items.length >= 2).length,
         'Total Questions': problemComments.filter(pc => pc.problemId === p.id).length,
         'Total Task Assignments': developments.filter(d => pIdeas.some(i => i.id === d.ideaId)).length,
         'Posted By': p.teacherName || 'Teacher',
-        'Teacher UID': p.teacherId || '—'
+        'Teacher UID': p.teacherId || '—',
+        'You Are Owner': isProblemOwner(p) ? 'Yes 👑' : 'No (View only)'
       };
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(problemRows.length ? problemRows : [{ Info: 'No problems yet' }]), '🎯 Problems');
 
-    // SHEET 3: GROUPS
     const groupRows = groups.map((g, idx) => {
       const members = students.filter(s => s.groupId === g.id);
       const gIdeas = ideas.filter(i => i.groupId === g.id);
@@ -944,7 +1054,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(groupRows.length ? groupRows : [{ Info: 'No groups yet' }]), '👥 Groups');
 
-    // SHEET 4: STUDENTS (full)
     const studentRows = students.map(s => {
       const own = ideas.filter(i => i.studentId === s.id);
       const avgR = own.length ? (own.reduce((sum, i) => sum + (i.rating || 0), 0) / own.length).toFixed(2) : '0.00';
@@ -983,7 +1092,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(studentRows.length ? studentRows : [{ Info: 'No students yet' }]), '🧑‍🎓 Students');
 
-    // SHEET 5: STUDENT SUMMARY
     const summaryRows = students.map((s, idx) => {
       const own = ideas.filter(i => i.studentId === s.id);
       const grp = groups.find(g => g.id === s.groupId);
@@ -1020,7 +1128,6 @@ export default function App() {
     }).sort((a, b) => b['Leaderboard Score'] - a['Leaderboard Score']);
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(summaryRows.length ? summaryRows : [{ Info: 'No students yet' }]), '🏅 Student Summary');
 
-    // SHEET 6: IDEAS
     const ideaRows = ideas.map((i, idx) => {
       const prob = problems.find(p => p.id === i.problemId);
       const dev = developments.find(d => d.ideaId === i.id);
@@ -1030,6 +1137,7 @@ export default function App() {
         '#': idx + 1,
         'Idea ID': i.id,
         'Problem': prob?.title || i.problemId,
+        'Problem Owner Teacher': prob?.teacherName || '—',
         'Student': i.studentName,
         'Student ID': i.studentId,
         'Group': i.groupName || '—',
@@ -1052,7 +1160,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(ideaRows.length ? ideaRows : [{ Info: 'No ideas yet' }]), '💡 Ideas');
 
-    // SHEET 7: TASKS
     const taskRows = developments.map((d, idx) => {
       const idea = ideas.find(i => i.id === d.ideaId);
       const stageObj = DEVELOPMENT_STAGES.find(s => s.key === d.stage);
@@ -1078,7 +1185,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(taskRows.length ? taskRows : [{ Info: 'No tasks yet' }]), '🚀 Tasks');
 
-    // SHEET 8: STUDENT TASK DETAIL
     const studentTaskRows = [];
     students.forEach(st => {
       const ownIdeas = ideas.filter(i => i.studentId === st.id);
@@ -1117,7 +1223,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(studentTaskRows.length ? studentTaskRows : [{ Info: 'No student tasks yet' }]), '📋 Student Tasks');
 
-    // SHEET 9: PERFORMANCE MATRIX
     const matrixRows = [];
     students.forEach(st => {
       visibleProblems.forEach(prob => {
@@ -1147,7 +1252,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(matrixRows.length ? matrixRows : [{ Info: 'No data yet' }]), '🎯 Perf Matrix');
 
-    // SHEET 10: PROBLEM COMMENTS
     const problemCommentRows = [];
     problemComments.forEach(pc => {
       const prob = problems.find(p => p.id === pc.problemId);
@@ -1171,7 +1275,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(problemCommentRows.length ? problemCommentRows : [{ Info: 'No problem comments yet' }]), '❓ Problem Comments');
 
-    // SHEET 11: IDEA COMMENTS
     const ideaCommentRows = [];
     ideas.forEach(idea => {
       const prob = problems.find(p => p.id === idea.problemId);
@@ -1188,7 +1291,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(ideaCommentRows.length ? ideaCommentRows : [{ Info: 'No idea comments yet' }]), '💬 Idea Comments');
 
-    // SHEET 12: ACTIVITY LOG
     const activityRows = [];
     ideas.forEach(idea => {
       activityRows.push({
@@ -1226,7 +1328,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(activityRows.length ? activityRows : [{ Info: 'No student activity yet' }]), '📊 Activity Log');
 
-    // SHEET 13: LEADERBOARD
     const leaderboardRows = leaderboardData.map((st, idx) => ({
       'Rank': idx + 1, 'Student': st.name, 'Student ID': st.id,
       'Group': groups.find(g => g.id === st.groupId)?.name || 'Unassigned',
@@ -1238,7 +1339,6 @@ export default function App() {
     }));
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(leaderboardRows.length ? leaderboardRows : [{ Info: 'No students yet' }]), '🏆 Leaderboard');
 
-    // SHEET 14: PARTICIPATION
     const participationRows = participationData.map(st => ({
       'Student': st.name, 'Student ID': st.id,
       'Group': groups.find(g => g.id === st.groupId)?.name || 'Unassigned',
@@ -1254,15 +1354,11 @@ export default function App() {
     }));
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(participationRows.length ? participationRows : [{ Info: 'No students yet' }]), '📈 Participation');
 
-    // SHEET 15: ANNOUNCEMENTS
     const announcementRows = announcements.map((a, idx) => ({
       '#': idx + 1, 'Title': a.title, 'Content': a.content, 'Time': a.time || '—'
     }));
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(announcementRows.length ? announcementRows : [{ Info: 'No announcements yet' }]), '📢 Announcements');
 
-    // =====================================================================
-    // 🆕 EXTENDED TEACHER-INSIGHT SHEETS (16 – 21)
-    // =====================================================================
     const topScore = Math.max(0, ...leaderboardData.map(l => l.score || 0));
     const gradeOf = (score, hasActivity = false) => {
       if (!topScore || !score || score <= 0) return hasActivity ? 'E – Poor (discussion only, no ideas)' : 'F – No Participation';
@@ -1274,7 +1370,6 @@ export default function App() {
       return 'E – Poor';
     };
 
-    // SHEET 16: STUDENT REPORT CARD (everything about one student in ONE row)
     const reportCardRows = leaderboardData.map((st, idx) => {
       const grp = groups.find(g => g.id === st.groupId);
       const own = ideas.filter(i => i.studentId === st.id);
@@ -1341,7 +1436,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(reportCardRows.length ? reportCardRows : [{ Info: 'No students yet' }]), '🎓 Report Card');
 
-    // SHEET 17: TASK TRACKER (deadline + progress + who is responsible)
     const statusOrder = { overdue: 0, soon: 1, ontrack: 2, nodeadline: 3, done: 4 };
     const trackerRows = [...developments]
       .sort((a, b) => statusOrder[taskStatusOf(a).key] - statusOrder[taskStatusOf(b).key])
@@ -1377,7 +1471,6 @@ export default function App() {
       });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(trackerRows.length ? trackerRows : [{ Info: 'No tasks yet' }]), '⏰ Task Tracker');
 
-    // SHEET 18: GROUP CONTRIBUTION (who did how much INSIDE each group)
     const contributionRows = [];
     const groupBuckets = groups.map(g => ({ id: g.id, name: g.name, members: students.filter(s => s.groupId === g.id) }));
     const unassignedStudents = students.filter(s => !s.groupId || !groups.some(g => g.id === s.groupId));
@@ -1430,7 +1523,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(contributionRows.length ? contributionRows : [{ Info: 'No groups yet' }]), '🤝 Group Contribution');
 
-    // SHEET 19: PROBLEM PARTICIPATION (who responded / who did NOT, per problem)
     const problemParticipationRows = visibleProblems.map((p, idx) => {
       const pIdeas = ideas.filter(i => i.problemId === p.id);
       const pQs = problemComments.filter(pc => pc.problemId === p.id);
@@ -1444,6 +1536,8 @@ export default function App() {
       return {
         '#': idx + 1,
         'Problem': p.title,
+        'Owner Teacher': p.teacherName || '—',
+        'Shared With All Teachers': p.sharedWithTeachers ? 'Yes 🌍' : 'No 🔒',
         'Deadline': p.deadline ? new Date(p.deadline).toLocaleString() : 'No Deadline',
         'Problem Status': isNaN(deadlineMs) ? '🟢 Open (no deadline)' : (deadlineMs < nowMs ? '🔒 Closed (deadline passed)' : '🟢 Open'),
         'Total Students': students.length,
@@ -1464,7 +1558,6 @@ export default function App() {
     });
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(problemParticipationRows.length ? problemParticipationRows : [{ Info: 'No problems yet' }]), '📌 Problem Participation');
 
-    // SHEET 20: REVIEW STATUS (which ideas teacher has / has not reviewed)
     const reviewOrder = { '⏳ Pending Review': 0, '🟡 Partially Reviewed': 1, '✅ Fully Reviewed': 2 };
     const reviewRows = ideas.map(i => {
       const hasRating = i.rating > 0;
@@ -1486,7 +1579,6 @@ export default function App() {
     }).sort((a, b) => reviewOrder[a['Review Status']] - reviewOrder[b['Review Status']]);
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(reviewRows.length ? reviewRows : [{ Info: 'No ideas yet' }]), '📝 Review Status');
 
-    // SHEET 22: 📅 MASTER SCHEDULE (one timetable-style page with EVERYTHING)
     const SCHED_NAME = '📅 Master Schedule';
     const SCHED_COLS = 13;
     const schedAoa = [];
@@ -1501,7 +1593,6 @@ export default function App() {
       ? [dev.note || '—', stageLabel(dev.stage), dev.deadline ? new Date(dev.deadline).toLocaleString() : '—', taskStatusOf(dev).label]
       : ['—', '—', '—', '—'];
 
-    // ---- Top summary block ----
     const doneTasksN = developments.filter(d => taskStatusOf(d).key === 'done').length;
     const overdueTasksN = developments.filter(d => taskStatusOf(d).key === 'overdue').length;
     const pendingReviewN = ideas.filter(i => !(i.rating > 0) && !i.teacherReply).length;
@@ -1530,7 +1621,7 @@ export default function App() {
     schedBlank();
     schedBanner('🎯 PROBLEMS DISCUSSED');
     if (problemParticipationRows.length) {
-      problemParticipationRows.forEach((r, i) => schedBanner(`${i + 1}. ${r['Problem']}   |   Deadline: ${r['Deadline']}   |   ${r['Ideas Posted']} ideas, ${r['Questions Asked']} questions   |   Participated: ${r['Students Who Participated']}/${r['Total Students']} students   |   Tasks: ${r['Tasks Assigned']}`));
+      problemParticipationRows.forEach((r, i) => schedBanner(`${i + 1}. ${r['Problem']}   |   Owner: ${r['Owner Teacher']}   |   Shared: ${r['Shared With All Teachers']}   |   Deadline: ${r['Deadline']}   |   ${r['Ideas Posted']} ideas, ${r['Questions Asked']} questions   |   Participated: ${r['Students Who Participated']}/${r['Total Students']} students   |   Tasks: ${r['Tasks Assigned']}`));
     } else {
       schedBanner('No problems posted yet.');
     }
@@ -1549,7 +1640,6 @@ export default function App() {
     schedBanner('📋 DETAILED SCHEDULE  (Group → Student → Problem → Activity → Teacher Remarks → Task)');
     schedAoa.push(['Group', 'Student', 'Problem', 'Activity', 'Time', 'Discussion / What the student did', 'Rating', 'Badge', 'Teacher Remarks', 'Task Assigned by Teacher', 'Task Stage', 'Task Deadline', 'Task Status']);
 
-    // ---- Detailed schedule: Group → Student → activities ----
     groupBuckets.forEach(gb => {
       schedBlank();
       schedBanner(`👥 GROUP: ${gb.name.toUpperCase()}   —   ${gb.members.length} member(s): ${gb.members.map(m => m.name).join(', ') || '—'}`);
@@ -1563,29 +1653,24 @@ export default function App() {
         const ownTaskIds = new Set(developments.filter(d => myIdeas.some(i => i.id === d.ideaId)).map(d => d.id));
 
         visibleProblems.forEach(prob => {
-          // 💡 Ideas (with rating, badge, teacher remarks, task)
           myIdeas.filter(i => i.problemId === prob.id).forEach(i => {
             const dev = developments.find(d => d.ideaId === i.id);
             const fb = i.teacherReply && String(i.teacherReply).trim() ? i.teacherReply : '— (no feedback yet)';
             rows.push([gb.name, st.name, prob.title, '💡 Idea', i.createdAt || '—', i.content, i.rating > 0 ? `${i.rating}/5` : 'Not rated', i.badge || '—', fb, ...devCols(dev)]);
           });
-          // ❓ Questions + teacher answer
           problemComments.filter(pc => pc.problemId === prob.id && pc.studentId === st.id).forEach(pc => {
             rows.push([gb.name, st.name, prob.title, '❓ Question', pc.time || '—', pc.text, '—', '—', pc.teacherReply || '— (not answered yet)', '—', '—', '—', '—']);
           });
-          // ↩️ Replies to classmates
           problemComments.filter(pc => pc.problemId === prob.id).forEach(pc => {
             (pc.studentReplies || []).filter(sr => sr.studentId === st.id).forEach(sr => {
               rows.push([gb.name, st.name, prob.title, '↩️ Reply', sr.time || '—', `Re "${trunc(pc.text)}": ${sr.text}`, '—', '—', '—', '—', '—', '—', '—']);
             });
           });
-          // 💬 Comments on ideas
           ideas.filter(i => i.problemId === prob.id).forEach(i => {
             (i.ideaComments || []).filter(c => c.studentId === st.id).forEach(c => {
               rows.push([gb.name, st.name, prob.title, '💬 Comment', c.time || '—', `On ${i.studentName}'s idea "${trunc(i.content)}": ${c.text}`, '—', '—', '—', '—', '—', '—', '—']);
             });
           });
-          // 🚀 Tasks given to the student's group / whole class (not their own idea)
           developments.filter(d => !ownTaskIds.has(d.id) && ((st.groupId && d.groupId === st.groupId) || !d.groupId)).forEach(d => {
             const idea = ideas.find(i => i.id === d.ideaId);
             if (!idea || idea.problemId !== prob.id) return;
@@ -1605,11 +1690,10 @@ export default function App() {
     schedSheet['!cols'] = [18, 18, 26, 18, 18, 60, 10, 14, 42, 38, 20, 20, 16].map(w => ({ wch: w }));
     XLSX.utils.book_append_sheet(workbook, schedSheet, SCHED_NAME);
 
-    // SHEET 21: SHEET GUIDE
     const guideRows = [
-      { Sheet: '📅 Master Schedule', 'What it tells you': 'START HERE. One timetable-style page: class snapshot, top performers, who needs attention, problems discussed, groups & members, then for every group → student → problem: what they said, teacher remarks/rating, and the task you assigned with deadline & status.' },
+      { Sheet: '📅 Master Schedule', 'What it tells you': 'START HERE. One timetable-style page: class snapshot, top performers, who needs attention, problems discussed (with owner teacher + sharing status), groups & members, then for every group → student → problem: what they said, teacher remarks/rating, and the task you assigned with deadline & status.' },
       { Sheet: '📊 Overview', 'What it tells you': 'Whole-class totals at a glance (ideas, tasks, overdue work, non-participants, pending reviews).' },
-      { Sheet: '🎯 Problems', 'What it tells you': 'Each problem with its deadline, ideas, questions and tasks.' },
+      { Sheet: '🎯 Problems', 'What it tells you': 'Each problem with its deadline, ideas, questions and tasks. Also shows whether it is shared with all teachers.' },
       { Sheet: '👥 Groups', 'What it tells you': 'Each group with members, ideas posted and its best idea.' },
       { Sheet: '🧑‍🎓 Students', 'What it tells you': 'Full raw details for every student.' },
       { Sheet: '🏅 Student Summary', 'What it tells you': 'Compact per-student totals sorted by leaderboard score.' },
@@ -1623,16 +1707,15 @@ export default function App() {
       { Sheet: '🏆 Leaderboard', 'What it tells you': 'Ranking by score (ideas×10 + high-rated×15 + upvotes given×2 + streak×5).' },
       { Sheet: '📈 Participation', 'What it tells you': 'Participation status of each student (Most Active … No Participation).' },
       { Sheet: '📢 Announcements', 'What it tells you': 'All announcements posted.' },
-      { Sheet: '🎓 Report Card', 'What it tells you': 'ONE row per student: grade, ideas, ratings, tasks done/overdue, problems NOT attempted and a "Needs Attention?" flag. Grade = student score as % of top score (A ≥80, B ≥60, C ≥40, D ≥20, E = low score or discussion only, F = no activity at all).' },
-      { Sheet: '⏰ Task Tracker', 'What it tells you': 'Every task with status (Overdue / Due Soon / On Track / Completed), days left, progress % and responsible students. Overdue tasks are listed first.' },
+      { Sheet: '🎓 Report Card', 'What it tells you': 'ONE row per student: grade, ideas, ratings, tasks done/overdue, problems NOT attempted and a "Needs Attention?" flag.' },
+      { Sheet: '⏰ Task Tracker', 'What it tells you': 'Every task with status, days left, progress % and responsible students.' },
       { Sheet: '🤝 Group Contribution', 'What it tells you': 'Inside each group: how much each member did and whether someone is not contributing.' },
-      { Sheet: '📌 Problem Participation', 'What it tells you': 'For each problem: who participated, who did NOT, participation %, top idea and task progress.' },
+      { Sheet: '📌 Problem Participation', 'What it tells you': 'For each problem: who participated, who did NOT, participation %, top idea and task progress. Also indicates owner teacher and sharing.' },
       { Sheet: '📝 Review Status', 'What it tells you': 'Which ideas still need your rating/feedback (pending ones are listed first).' },
       { Sheet: '📖 Sheet Guide', 'What it tells you': 'This page.' }
     ];
     XLSX.utils.book_append_sheet(workbook, XLSX.utils.json_to_sheet(guideRows), '📖 Sheet Guide');
 
-    // 🧹 Readability: auto column width + filter buttons on every sheet
     workbook.SheetNames.forEach(name => {
       const ws = workbook.Sheets[name];
       if (!ws || !ws['!ref'] || name === SCHED_NAME) return;
@@ -1653,7 +1736,6 @@ export default function App() {
       ws['!autofilter'] = { ref: ws['!ref'] };
     });
 
-    // 📅 Put the Master Schedule first so the teacher sees it on opening
     const schedIdx = workbook.SheetNames.indexOf(SCHED_NAME);
     if (schedIdx > 0) { workbook.SheetNames.splice(schedIdx, 1); workbook.SheetNames.unshift(SCHED_NAME); }
 
@@ -2170,16 +2252,22 @@ export default function App() {
             </div>
 
             <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-              <h3 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-indigo-600" /> Manage Problems <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full ml-auto">{visibleProblems.length} of yours</span></h3>
+              <h3 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-indigo-600" /> Manage Problems <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full ml-auto">{visibleProblems.length} visible</span></h3>
               <div className="flex flex-col gap-3 max-h-[380px] overflow-y-auto pr-1">
                 {visibleProblems.map(prob => {
                   const probStudentsCanSee = prob.peerResponsesVisible !== false;
                   const clusterCount = (clusteredIdeasByProblem[prob.id] || []).length;
                   const similarCount = (clusteredIdeasByProblem[prob.id] || []).filter(c => c.items.length >= 2).length;
+                  const owner = isProblemOwner(prob);
+                  const shared = prob.sharedWithTeachers === true;
                   return (
                     <div key={prob.id} onClick={() => setSelectedProblemId(prob.id)} className={`p-4 rounded-xl border transition cursor-pointer relative ${selectedProblemId === prob.id ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
                       <div className="flex justify-between items-start mb-1 pr-12">
-                        <h3 className="font-bold text-slate-800 text-sm">{prob.title}</h3>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <h3 className="font-bold text-slate-800 text-sm">{prob.title}</h3>
+                          {!owner && <span className="text-[9px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Eye className="w-2.5 h-2.5" /> View only</span>}
+                          {shared && <span className="text-[9px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Globe className="w-2.5 h-2.5" /> Shared</span>}
+                        </div>
                         <span className="text-[10px] text-slate-400">{prob.createdTime}</span>
                       </div>
                       <p className="text-xs text-slate-500 line-clamp-2 mb-3">{prob.description}</p>
@@ -2187,18 +2275,34 @@ export default function App() {
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 flex items-center gap-1"><Layers className="w-3 h-3" /> {clusterCount} cluster{clusterCount === 1 ? '' : 's'}</span>
                         {similarCount > 0 && <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-600 text-white flex items-center gap-1"><Link2 className="w-3 h-3" /> {similarCount} similar</span>}
                       </div>
-                      <div className="absolute top-3 right-3 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                        <button onClick={() => handleEditProblemClick(prob)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition" title="Edit Problem"><Edit3 className="w-3.5 h-3.5" /></button>
-                        <button onClick={() => handleDeleteProblem(prob.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-slate-100 rounded-md transition" title="Delete Problem"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </div>
+                      {owner && (
+                        <div className="absolute top-3 right-3 flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => handleEditProblemClick(prob)} className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-md transition" title="Edit Problem"><Edit3 className="w-3.5 h-3.5" /></button>
+                          <button onClick={() => handleDeleteProblem(prob.id)} className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-slate-100 rounded-md transition" title="Delete Problem"><Trash2 className="w-3.5 h-3.5" /></button>
+                        </div>
+                      )}
                       <div className="text-[11px] font-semibold text-slate-600 pt-2 border-t border-slate-100 flex items-center gap-1 mb-2">
                         <Calendar className="w-3.5 h-3.5 text-slate-400" /><span>Deadline: {prob.deadline ? new Date(prob.deadline).toLocaleString() : 'No Deadline'}</span>
                       </div>
-                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100" onClick={(e) => e.stopPropagation()}>
-                        <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${probStudentsCanSee ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>{probStudentsCanSee ? '👁️ Visible' : '🙈 Hidden'}</span>
-                        <button onClick={() => handleToggleStudentsVisibility(prob.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border transition ${probStudentsCanSee ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`} title={probStudentsCanSee ? 'Hide' : 'Show'}>
-                          {probStudentsCanSee ? <><Lock className="w-3 h-3" /> Hide</> : <><Eye className="w-3 h-3" /> Show</>}
-                        </button>
+                      <div className="flex items-center justify-between gap-2 pt-2 border-t border-slate-100 flex-wrap" onClick={(e) => e.stopPropagation()}>
+                        {owner ? (
+                          <>
+                            <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${probStudentsCanSee ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-amber-100 text-amber-800 border-amber-300'}`}>{probStudentsCanSee ? '👁️ Visible' : '🙈 Hidden'}</span>
+                            <div className="flex items-center gap-1 flex-wrap">
+                              <button onClick={() => handleToggleStudentsVisibility(prob.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border transition ${probStudentsCanSee ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`} title={probStudentsCanSee ? 'Hide' : 'Show'}>
+                                {probStudentsCanSee ? <><Lock className="w-3 h-3" /> Hide</> : <><Eye className="w-3 h-3" /> Show</>}
+                              </button>
+                              <button onClick={() => handleToggleProblemShare(prob.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border transition ${shared ? 'bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`} title={shared ? 'Stop sharing' : 'Share with all teachers'}>
+                                <Globe className="w-3 h-3" /> {shared ? 'Unshare' : 'Share'}
+                              </button>
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><UserCheck className="w-3 h-3" /> By {prob.teacherName || 'Teacher'}</span>
+                            <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full flex items-center gap-1"><Eye className="w-3 h-3" /> View Only</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   );
@@ -2246,9 +2350,9 @@ export default function App() {
               </div>
               <div className="flex flex-wrap items-center gap-3">
                 <button onClick={handleGenerateAISummary} disabled={generatingSummary} className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm disabled:opacity-60"><Sparkles className="w-4 h-4" /> {generatingSummary ? 'Analyzing…' : 'AI Summary'}</button>
-                <button onClick={handleExportExcel} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm" title="Download detailed Excel report (22 sheets)"><Download className="w-4 h-4" /> Export Excel</button>
+                <button onClick={handleExportExcel} className="bg-teal-600 hover:bg-teal-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm" title="Download detailed Excel report"><Download className="w-4 h-4" /> Export Excel</button>
                 <button onClick={handleExportReport} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"><FileText className="w-4 h-4" /> Export PDF</button>
-                <button onClick={() => { setEditingProblem(null); setTeacherProblemTitle(''); setTeacherProblemDesc(''); setTeacherProblemDeadline(''); setTeacherProblemPeerVisible(true); setShowTeacherModal(true); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"><Plus className="w-4 h-4" /> Create Problem</button>
+                <button onClick={() => { setEditingProblem(null); setTeacherProblemTitle(''); setTeacherProblemDesc(''); setTeacherProblemDeadline(''); setTeacherProblemPeerVisible(true); setTeacherProblemShared(false); setShowTeacherModal(true); }} className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl text-xs font-semibold transition flex items-center gap-1.5 shadow-sm"><Plus className="w-4 h-4" /> Create Problem</button>
               </div>
             </div>
 
@@ -2261,9 +2365,11 @@ export default function App() {
                     <p className="text-[11px] text-slate-600 mt-0.5"><strong>{activeProblem?.title}</strong></p>
                   </div>
                 </div>
-                <button onClick={() => handleToggleStudentsVisibility(activeProblem.id)} className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl border transition shadow-sm ${studentsCanSeeEachOther ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700' : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'}`}>
-                  {studentsCanSeeEachOther ? <><Lock className="w-4 h-4" /> Hide</> : <><Eye className="w-4 h-4" /> Show</>}
-                </button>
+                {canManageActiveProblem && (
+                  <button onClick={() => handleToggleStudentsVisibility(activeProblem.id)} className={`flex items-center gap-1.5 text-xs font-bold px-4 py-2 rounded-xl border transition shadow-sm ${studentsCanSeeEachOther ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700' : 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700'}`}>
+                    {studentsCanSeeEachOther ? <><Lock className="w-4 h-4" /> Hide</> : <><Eye className="w-4 h-4" /> Show</>}
+                  </button>
+                )}
               </div>
             )}
 
@@ -2373,13 +2479,19 @@ export default function App() {
                           <div className="space-y-2">
                             {items.map(d => {
                               const idea = ideas.find(i => i.id === d.ideaId);
+                              const prob = idea ? problems.find(p => p.id === idea.problemId) : null;
+                              const owner = prob ? isProblemOwner(prob) : false;
                               return (
                                 <div key={d.id} className="p-2 bg-white rounded-lg border border-slate-200 text-[11px]">
                                   <p className="font-bold text-slate-800 truncate">{idea?.studentName}</p>
                                   <p className="text-slate-600 line-clamp-2 mt-0.5">{idea?.content}</p>
                                   {d.note && <p className="text-[10px] text-indigo-700 mt-1"><b>Next:</b> {d.note}</p>}
                                   <div className="flex items-center justify-between mt-1.5">
-                                    <button onClick={() => idea && handleOpenDevelop(idea)} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"><Edit3 className="w-3 h-3" /> Update</button>
+                                    {owner ? (
+                                      <button onClick={() => idea && handleOpenDevelop(idea)} className="text-[10px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-0.5"><Edit3 className="w-3 h-3" /> Update</button>
+                                    ) : (
+                                      <span className="text-[9px] font-bold text-slate-500 flex items-center gap-0.5"><Eye className="w-2.5 h-2.5" /> View only</span>
+                                    )}
                                     {d.visibleToOthers === false && <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Private</span>}
                                   </div>
                                 </div>
@@ -2399,9 +2511,10 @@ export default function App() {
                     {visibleProblems.map((prob, pIdx) => {
                       const probIdeas = ideas.filter(i => i.problemId === prob.id);
                       if (probIdeas.length === 0) return null;
+                      const owner = isProblemOwner(prob);
                       return (
                         <div key={prob.id}>
-                          <div className="flex items-center gap-2 mb-3 pb-2 border-b-2 border-indigo-100">
+                          <div className="flex items-center gap-2 mb-3 pb-2 border-b-2 border-indigo-100 flex-wrap">
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-indigo-600 text-white">Problem {pIdx + 1}</span>
                             <h4 className="font-bold text-slate-800 text-sm flex-1 min-w-0 truncate">{prob.title}</h4>
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200 flex-shrink-0">{probIdeas.length} opinion{probIdeas.length === 1 ? '' : 's'}</span>
@@ -2430,7 +2543,11 @@ export default function App() {
                                         {dev.visibleToOthers === false && <span className="text-[9px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 flex items-center gap-0.5"><Lock className="w-2.5 h-2.5" /> Private</span>}
                                       </div>
                                     ) : (<span className="text-[10px] text-slate-400 italic">Not assigned yet</span>)}
-                                    <button onClick={() => handleOpenDevelop(idea)} className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-md border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition"><Rocket className="w-3 h-3" /> {dev ? 'Update Task' : 'Assign Task'}</button>
+                                    {owner ? (
+                                      <button onClick={() => handleOpenDevelop(idea)} className="flex items-center gap-1 text-[11px] font-bold px-3 py-1 rounded-md border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition"><Rocket className="w-3 h-3" /> {dev ? 'Update Task' : 'Assign Task'}</button>
+                                    ) : (
+                                      <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><Eye className="w-3 h-3" /> View only</span>
+                                    )}
                                   </div>
                                 </div>
                               );
@@ -2572,6 +2689,7 @@ export default function App() {
                 {queryProblem && (() => {
                   const prob = queryProblem;
                   const probIdeas = ideas.filter(i => i.problemId === prob.id);
+                  const canReview = isProblemOwner(prob);
                   let clusters = clusteredIdeasByProblem[prob.id] || [];
                   if (clusterSearch.trim()) {
                     const q = clusterSearch.toLowerCase();
@@ -2651,15 +2769,6 @@ export default function App() {
                             {probIdeas.filter(i => i.rating === 0).length} unrated · {probIdeas.filter(i => i.rating > 0).length} reviewed · <span className="text-indigo-700">{(clusteredIdeasByProblem[prob.id] || []).filter(c => c.items.length >= 2).length} similar clusters</span>
                           </span>
                         </div>
-                        {clusterFilter === 'similar' && (
-                          <div className="mt-3 p-2.5 rounded-lg bg-indigo-50 border border-indigo-200 text-[11px] text-indigo-800 flex items-start gap-2">
-                            <Link2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
-                            <div>
-                              <p className="font-bold">🔗 Similar Ideas View — Teacher only</p>
-                              <p className="mt-0.5">Shows clusters that contain 2+ similar ideas with match details. Students never see this warning.</p>
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       <div className="bg-white rounded-2xl p-5 border-2 border-indigo-200 shadow-sm">
@@ -2675,7 +2784,7 @@ export default function App() {
                         {clusters.length === 0 ? (
                           <div className="text-center py-10">
                             <Layers className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                            <p className="text-xs text-slate-500">{clusterFilter === 'similar' ? 'No similar clusters found for this problem.' : 'No clusters match your filters.'}</p>
+                            <p className="text-xs text-slate-500">No clusters match your filters.</p>
                           </div>
                         ) : (
                           <div className="space-y-3">
@@ -2750,16 +2859,19 @@ export default function App() {
                                                   </div>
                                                 )}
                                               </div>
+
                                               <div className="flex items-center justify-between p-2 rounded-lg border border-slate-200 bg-slate-50">
                                                 <span className="text-[10px] font-bold text-slate-500">{idea.visibleToStudents === false ? '🙈 Hidden from students' : '👁️ Visible to students'}</span>
                                                 <button onClick={() => handleToggleIdeaVisibility(idea.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-md border transition ${idea.visibleToStudents === false ? 'bg-red-50 text-red-700 border-red-200 hover:bg-red-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`}>{idea.visibleToStudents === false ? <><EyeOff className="w-3 h-3" /> Show</> : <><Eye className="w-3 h-3" /> Hide</>}</button>
                                               </div>
+
                                               <div className="flex items-center justify-between gap-2 p-2 rounded-lg border border-slate-200 bg-slate-50">
                                                 <div className="flex flex-wrap items-center gap-1">
                                                   {dev && stageObj ? <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${stageObj.cls}`}>{stageObj.emoji} {stageObj.label}</span> : <span className="text-[10px] font-bold text-slate-400 italic">Not assigned</span>}
                                                 </div>
                                                 <button onClick={() => handleOpenDevelop(idea)} className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-md border bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100 transition"><Rocket className="w-3 h-3" /> {dev ? 'Update Task' : 'Assign Task'}</button>
                                               </div>
+
                                               <div className="p-2 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
                                                 <div className="flex items-center justify-between">
                                                   <span className="text-[10px] font-bold text-slate-500">Rate:</span>
@@ -2851,6 +2963,15 @@ export default function App() {
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={teacherProblemPeerVisible} onChange={(e) => setTeacherProblemPeerVisible(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-600" />
                   <div><p className="text-xs font-bold text-slate-800">👁️ Students can see each other</p><p className="text-[11px] text-slate-500 mt-0.5">Uncheck for graded work.</p></div>
+                </label>
+              </div>
+              <div className="p-3 rounded-lg border-2 border-cyan-200 bg-cyan-50">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input type="checkbox" checked={teacherProblemShared} onChange={(e) => setTeacherProblemShared(e.target.checked)} className="mt-0.5 w-4 h-4 accent-cyan-600" />
+                  <div>
+                    <p className="text-xs font-bold text-cyan-900 flex items-center gap-1"><Globe className="w-3.5 h-3.5" /> Share with all teachers (view only)</p>
+                    <p className="text-[11px] text-cyan-800 mt-0.5">Other teachers will see this problem and its ideas, but only <b>you</b> can edit, rate, give feedback, or assign tasks.</p>
+                  </div>
                 </label>
               </div>
               <div className="flex justify-end gap-2 pt-2">

@@ -17,6 +17,9 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'fire
 import { doc, getDoc } from 'firebase/firestore';
 import { setItem } from './services/db';
 
+// 🆕 Sirf ek hi teacher allowed hai
+const TEACHER_EMAIL = 't.teacher@gmail.com';
+
 const CARD_THEMES = [
     { bg: 'bg-amber-100/90', border: 'border-amber-200/80', btnBg: 'bg-amber-200/70', btnHover: 'hover:bg-amber-300/80', btnText: 'text-amber-900', fireColor: 'text-amber-600', badgeText: 'text-amber-900/80', borderSep: 'border-amber-200/60' },
     { bg: 'bg-rose-100/90', border: 'border-rose-200/80', btnBg: 'bg-rose-200/70', btnHover: 'hover:bg-rose-300/80', btnText: 'text-rose-900', fireColor: 'text-rose-600', badgeText: 'text-rose-900/80', borderSep: 'border-rose-200/60' },
@@ -33,7 +36,7 @@ const INITIAL_NOTES = [
 
 /* ✅ Email validation helpers */
 const GENERAL_EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const GMAIL_EMAIL_REGEX = /^[ts]\.[a-zA-Z0-9][a-zA-Z0-9._%+-]*@gmail\.com$/;
+const STUDENT_EMAIL_REGEX = /^s\.[a-zA-Z0-9][a-zA-Z0-9._%+-]*@gmail\.com$/;
 
 export default function Login({ onLogin }) {
     const [authMode, setAuthMode] = useState('signin');
@@ -70,7 +73,7 @@ export default function Login({ onLogin }) {
         showToast("Idea posted to board!");
     };
 
-    /* ✅ Validate email — proper Gmail + role prefix */
+    /* ✅ Validate email — sirf ek teacher allowed + student Gmail pattern */
     const validateEmail = (rawEmail) => {
         const email = rawEmail.trim().toLowerCase();
 
@@ -90,15 +93,29 @@ export default function Login({ onLogin }) {
 
         // Must start with 't.' (teacher) or 's.' (student)
         if (!localPart.startsWith('t.') && !localPart.startsWith('s.')) {
-            return { ok: false, msg: "Email must start with 't.' for Teacher or 's.' for Student (e.g. t.ahmed@gmail.com)." };
+            return { ok: false, msg: "Incorrect email!\n Check your email." };
         }
 
-        // Full pattern check: t.<something>@gmail.com or s.<something>@gmail.com
-        if (!GMAIL_EMAIL_REGEX.test(email)) {
-            return { ok: false, msg: "Email format is invalid. Use 't.name@gmail.com' or 's.name@gmail.com' with only letters, numbers, dots, +, -, or _." };
+        // 🆕 TEACHER: sirf ek hi teacher account allowed
+        if (localPart.startsWith('t.')) {
+            if (email !== TEACHER_EMAIL) {
+                return {
+                    ok: false,
+                    msg: `Incorrect email!\n Check your email.`
+                };
+            }
+            return { ok: true, email, role: 'teacher' };
         }
 
-        return { ok: true, email, role: localPart.startsWith('t.') ? 'teacher' : 'student' };
+        // 🆕 STUDENT: strict pattern s.<something>@gmail.com
+        if (!STUDENT_EMAIL_REGEX.test(email)) {
+            return {
+                ok: false,
+                msg: "Student email format is invalid. Use 's.name@gmail.com' with only letters, numbers, dots, +, -, or _."
+            };
+        }
+
+        return { ok: true, email, role: 'student' };
     };
 
     // 🔥 FIREBASE AUTH LOGIC
@@ -232,7 +249,7 @@ export default function Login({ onLogin }) {
                         <div>
                             <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">{authMode === 'signin' ? 'Sign in to your board' : 'Create your account'}</h2>
                             <p className="text-xs text-slate-500 mt-1">
-                                Use <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-orange-600">t.name@gmail.com</code> for Teacher view or <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-orange-600">s.name@gmail.com</code> for Student view.
+                                Students use <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-orange-600">s.name@gmail.com</code>. Teacher uses <code className="bg-slate-100 px-1 py-0.5 rounded font-mono text-orange-600">t.teacher@gmail.com</code> only.
                             </p>
                         </div>
 
@@ -252,7 +269,7 @@ export default function Login({ onLogin }) {
                                 <label className="block text-xs font-bold text-slate-600 uppercase tracking-wider mb-1">School or institutional email</label>
                                 <div className="relative">
                                     <Mail className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
-                                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="t.name@gmail.com or s.name@gmail.com" className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-colors" />
+                                    <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="s.name@gmail.com or t.teacher@gmail.com" className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-orange-500 focus:ring-1 focus:ring-orange-500 transition-colors" />
                                 </div>
                             </div>
 
