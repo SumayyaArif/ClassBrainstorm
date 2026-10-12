@@ -74,6 +74,78 @@ const computeStreakUpdate = (student) => {
   return { streak: newStreak, lastActiveDate: today };
 };
 
+
+// ✅ @mention + edit/delete helpers
+const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const MentionText = ({ text, names }) => {
+  if (!text) return null;
+  const list = [...new Set(names || [])].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (!list.length) return <>{text}</>;
+  const re = new RegExp(`(@(?:${list.map(escapeRe).join('|')})(?![\\w]))`, 'gi');
+  return <>{text.split(re).map((p, i) => (i % 2 === 1
+    ? <span key={i} className="font-bold text-indigo-700 bg-indigo-100/70 rounded px-0.5">{p}</span>
+    : <React.Fragment key={i}>{p}</React.Fragment>))}</>;
+};
+
+const MentionInput = ({ value, onChange, names, placeholder, className = '', disabled, onEnter, autoFocus }) => {
+  const [query, setQuery] = useState(null);
+  const ref = useRef(null);
+  const detect = (val, caret) => {
+    const m = /(^|\s)@([^@\n]{0,20})$/.exec(val.slice(0, caret));
+    setQuery(m ? m[2].toLowerCase() : null);
+  };
+  const matches = query === null ? [] : [...new Set(names || [])].filter(n => n && n.toLowerCase().includes(query)).slice(0, 5);
+  const pick = (name) => {
+    const el = ref.current;
+    const caret = el?.selectionStart ?? value.length;
+    const before = value.slice(0, caret).replace(/@[^@\n]{0,20}$/, `@${name} `);
+    onChange(before + value.slice(caret));
+    setQuery(null);
+    setTimeout(() => { el?.focus(); el?.setSelectionRange(before.length, before.length); }, 0);
+  };
+  return (
+    <div className="relative flex-1 min-w-0">
+      <input
+        ref={ref} type="text" value={value} disabled={disabled} placeholder={placeholder} autoFocus={autoFocus}
+        className={`${className} w-full`}
+        onChange={(e) => { onChange(e.target.value); detect(e.target.value, e.target.selectionStart); }}
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') setQuery(null);
+          if ((e.key === 'Enter' || e.key === 'Tab') && matches.length) { e.preventDefault(); pick(matches[0]); return; }
+          if (e.key === 'Enter' && onEnter) { e.preventDefault(); onEnter(); }
+        }}
+        onBlur={() => setTimeout(() => setQuery(null), 150)}
+      />
+      {matches.length > 0 && (
+        <div className="absolute bottom-full mb-1 left-0 z-30 w-48 bg-white border border-slate-200 rounded-lg shadow-lg overflow-hidden">
+          {matches.map(n => (
+            <button key={n} type="button" onMouseDown={(e) => { e.preventDefault(); pick(n); }} className="w-full text-left text-[11px] font-medium text-slate-700 px-2.5 py-1.5 hover:bg-indigo-50">@{n}</button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
+
+const InlineEdit = ({ initial, names, onSave, onCancel }) => {
+  const [val, setVal] = useState(initial || '');
+  return (
+    <div className="flex gap-1 mt-1">
+      <MentionInput value={val} onChange={setVal} names={names} autoFocus onEnter={() => onSave(val)} className="text-[11px] px-2 py-1 border border-indigo-300 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+      <button type="button" onClick={() => onSave(val)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold px-2 rounded">Save</button>
+      <button type="button" onClick={onCancel} className="bg-slate-100 hover:bg-slate-200 text-slate-600 text-[10px] font-semibold px-2 rounded">Cancel</button>
+    </div>
+  );
+};
+
+const ActionBtns = ({ canEdit, canDelete, onEdit, onDelete }) => (
+  <span className="inline-flex items-center gap-1 ml-1.5 align-middle">
+    {canEdit && <button type="button" onClick={onEdit} title="Edit" className="text-slate-400 hover:text-indigo-600 transition"><Edit3 className="w-3 h-3" /></button>}
+    {canDelete && <button type="button" onClick={onDelete} title="Delete" className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-3 h-3" /></button>}
+  </span>
+);
+
 export default function App() {
   const [currentUser, setCurrentUser] = useState(null);
   const [role, setRole] = useState('student');
@@ -217,6 +289,8 @@ export default function App() {
 
   const currentStudent = students.find(s => s.id === currentStudentId) || null;
   const currentGroup = groups.find(g => g.id === currentStudent?.groupId) || null;
+  const [editing, setEditing] = useState(null); // e.g. 'chat:ID', 'ic:ID', 'pc:ID', 'sr:ID', 'tr:ID', 'ti:ID'
+  const mentionNames = useMemo(() => ['Teacher', ...students.map(st => st.name)].filter(Boolean), [students]);
 
   // 🆕 FIX: Only ONE teacher exists (t.teacher@gmail.com) — they own every problem
   const isProblemOwner = (prob) => role === 'teacher';
@@ -435,6 +509,7 @@ export default function App() {
       commentsCount: (currentStudent.commentsCount || 0) + 1,
       lastActive: 'Just now', ...streakUpdate
     });
+    await notifyMentions(newChatText, 'in your group chat');
     setNewChatText('');
   };
 
@@ -457,6 +532,7 @@ export default function App() {
       audience: 'teacher',
       teacherId: activeProblem.teacherId || null
     });
+    await notifyMentions(newProbCommentText, 'in a question');
     setNewProbCommentText('');
   };
 
@@ -542,6 +618,7 @@ export default function App() {
     if (idea && idea.studentId !== currentStudentId) {
       await addNotification(`💬 ${currentUser?.name || currentStudent.name} commented on your idea`, { audience: 'student', studentId: idea.studentId });
     }
+    await notifyMentions(text, 'in a comment');
     setNewIdeaCommentMap({ ...newIdeaCommentMap, [ideaId]: '' });
   };
 
@@ -812,6 +889,7 @@ export default function App() {
       }
     }
     await updateItem('ideas', ideaId, { teacherReply: reply });
+    await notifyMentions(reply, 'in feedback');
     setReplyTextMap({ ...replyTextMap, [ideaId]: '' });
     if (idea) await addNotification(`💬 Teacher replied to your idea`, { audience: 'student', studentId: idea.studentId });
     showPopup('✅ Teacher Replied to an Idea', reply, 'teacher');
@@ -829,6 +907,7 @@ export default function App() {
       }
     }
     await updateItem('problemComments', commentId, { teacherReply: reply });
+    await notifyMentions(reply, 'in a reply');
     setReplyTextMap({ ...replyTextMap, [commentId]: '' });
     if (comment) await addNotification(`💬 Teacher replied to your question`, { audience: 'student', studentId: comment.studentId });
     showPopup('✅ Teacher Replied', reply, 'teacher');
@@ -858,7 +937,79 @@ export default function App() {
       audience: 'teacher',
       teacherId: probOfComment?.teacherId || null
     });
+    await notifyMentions(reply, 'in a reply');
     setNewStudentReplyMap({ ...newStudentReplyMap, [commentId]: '' });
+  };
+
+  // ✅ @mention notifications
+  const notifyMentions = async (text, where) => {
+    if (!text) return;
+    const me = currentUser?.name || currentStudent?.name || 'Someone';
+    for (const st of students) {
+      if (!st.name || st.id === currentStudentId) continue;
+      if (new RegExp('@' + escapeRe(st.name) + '(?![\\w])', 'i').test(text)) {
+        await addNotification(`🔔 ${me} mentioned you ${where}`, { audience: 'student', studentId: st.id });
+      }
+    }
+    if (role === 'student' && /@teacher(?![\w])/i.test(text)) {
+      await addNotification(`🔔 ${me} mentioned you ${where}`, { audience: 'teacher', teacherId: activeProblem?.teacherId || null });
+    }
+  };
+
+  // ✅ Edit / Delete for comments & replies
+  const confirmDelete = (what) => window.confirm(`Delete this ${what}?`);
+  const bumpComments = async (studentId, d) => {
+    const st = students.find(x => x.id === studentId);
+    if (st) await updateItem('students', st.id, { commentsCount: Math.max(0, (st.commentsCount || 0) + d) });
+  };
+  const patchList = (item, field, id, patch) => (item[field] || []).map(x => x.id === id ? { ...x, ...patch } : x);
+
+  const handleEditChat = async (id, text) => {
+    const t = text.trim(); if (!t) return;
+    await updateItem('privateChats', id, { text: t, edited: true });
+    await notifyMentions(t, 'in your group chat'); setEditing(null);
+  };
+  const handleDeleteChat = async (chat) => {
+    if (!confirmDelete('message')) return;
+    await deleteItem('privateChats', chat.id); await bumpComments(chat.studentId, -1);
+  };
+  const handleEditIdeaComment = async (idea, cid, text) => {
+    const t = text.trim(); if (!t) return;
+    await updateItem('ideas', idea.id, { ideaComments: patchList(idea, 'ideaComments', cid, { text: t, edited: true }) });
+    await notifyMentions(t, 'in a comment'); setEditing(null);
+  };
+  const handleDeleteIdeaComment = async (idea, c) => {
+    if (!confirmDelete('comment')) return;
+    await updateItem('ideas', idea.id, { ideaComments: (idea.ideaComments || []).filter(x => x.id !== c.id) });
+    await bumpComments(c.studentId, -1);
+  };
+  const handleEditQuestion = async (pc, text) => {
+    const t = text.trim(); if (!t) return;
+    await updateItem('problemComments', pc.id, { text: t, edited: true });
+    await notifyMentions(t, 'in a question'); setEditing(null);
+  };
+  const handleDeleteQuestion = async (pc) => {
+    if (!confirmDelete('question (its replies will be removed too)')) return;
+    await deleteItem('problemComments', pc.id); await bumpComments(pc.studentId, -1);
+  };
+  const handleEditStudentReply = async (pc, rid, text) => {
+    const t = text.trim(); if (!t) return;
+    await updateItem('problemComments', pc.id, { studentReplies: patchList(pc, 'studentReplies', rid, { text: t, edited: true }) });
+    await notifyMentions(t, 'in a reply'); setEditing(null);
+  };
+  const handleDeleteStudentReply = async (pc, sr) => {
+    if (!confirmDelete('reply')) return;
+    await updateItem('problemComments', pc.id, { studentReplies: (pc.studentReplies || []).filter(x => x.id !== sr.id) });
+    await bumpComments(sr.studentId, -1);
+  };
+  const handleEditTeacherReply = async (col, id, text) => {
+    const t = text.trim(); if (!t) return;
+    await updateItem(col, id, { teacherReply: t, teacherReplyEdited: true });
+    await notifyMentions(t, 'in a reply'); setEditing(null);
+  };
+  const handleDeleteTeacherReply = async (col, id) => {
+    if (!confirmDelete('reply')) return;
+    await updateItem(col, id, { teacherReply: '', teacherReplyEdited: false });
   };
 
   const handleExportReport = () => {
@@ -1986,9 +2137,9 @@ export default function App() {
                   <div key={chat.id} className="bg-slate-50 p-2.5 rounded-xl border border-slate-100 text-xs">
                     <div className="flex justify-between items-center mb-1">
                       <span className="font-bold text-slate-700">{chat.sender === currentStudent.name ? `${chat.sender} (you)` : chat.sender}</span>
-                      <span className="text-[10px] text-slate-400">{chat.time}</span>
+                      <span className="text-[10px] text-slate-400">{chat.time}{chat.edited && ' • edited'}<ActionBtns canEdit={chat.studentId === currentStudentId} canDelete={chat.studentId === currentStudentId} onEdit={() => setEditing('chat:' + chat.id)} onDelete={() => handleDeleteChat(chat)} /></span>
                     </div>
-                    <p className="text-slate-600">{chat.text}</p>
+                    {editing === 'chat:' + chat.id ? <InlineEdit initial={chat.text} names={mentionNames} onSave={(v) => handleEditChat(chat.id, v)} onCancel={() => setEditing(null)} /> : <p className="text-slate-600"><MentionText text={chat.text} names={mentionNames} /></p>}
                   </div>
                 ))}
                 {currentGroup && privateChats.filter(c => c.groupId === currentGroup.id).length === 0 && (
@@ -1999,7 +2150,7 @@ export default function App() {
                 )}
               </div>
               <form onSubmit={handleSendPrivateChat} className="flex gap-2">
-                <input type="text" placeholder={currentGroup ? "Message your group..." : "Join a group to chat"} value={newChatText} onChange={(e) => setNewChatText(e.target.value)} disabled={!currentGroup} className="flex-1 text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50" />
+                <MentionInput placeholder={currentGroup ? "Message your group... (type @ to mention)" : "Join a group to chat"} value={newChatText} onChange={setNewChatText} names={mentionNames} disabled={!currentGroup} className="text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500 disabled:bg-slate-50" />
                 <button type="submit" disabled={!currentGroup} className="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition flex items-center gap-1 disabled:opacity-60"><Send className="w-3.5 h-3.5" /></button>
               </form>
             </div>
@@ -2098,7 +2249,7 @@ export default function App() {
                           {idea.teacherReply && (
                             <div className="mt-2 p-2 bg-white/80 rounded-lg border border-black/10 text-[11px] text-slate-800">
                               <span className="font-bold text-emerald-700 flex items-center gap-1"><CornerDownRight className="w-3 h-3" /> Teacher Feedback:</span>
-                              <p className="mt-0.5 text-slate-700">{idea.teacherReply}</p>
+                              <p className="mt-0.5 text-slate-700"><MentionText text={idea.teacherReply} names={mentionNames} /></p>
                             </div>
                           )}
                           {canSeeProgress && (
@@ -2133,15 +2284,15 @@ export default function App() {
                                   <div key={c.id} className="bg-white/80 rounded-lg px-2 py-1.5 text-[11px]">
                                     <div className="flex justify-between items-center mb-0.5">
                                       <span className="font-bold text-slate-800">{c.studentId === currentStudentId ? `${c.studentName} (you)` : c.studentName}</span>
-                                      <span className="text-slate-500 text-[10px]">{c.time}</span>
+                                      <span className="text-slate-500 text-[10px]">{c.time}{c.edited && ' • edited'}<ActionBtns canEdit={c.studentId === currentStudentId} canDelete={c.studentId === currentStudentId} onEdit={() => setEditing('ic:' + c.id)} onDelete={() => handleDeleteIdeaComment(idea, c)} /></span>
                                     </div>
-                                    <p className="text-slate-700">{c.text}</p>
+                                    {editing === 'ic:' + c.id ? <InlineEdit initial={c.text} names={mentionNames} onSave={(v) => handleEditIdeaComment(idea, c.id, v)} onCancel={() => setEditing(null)} /> : <p className="text-slate-700"><MentionText text={c.text} names={mentionNames} /></p>}
                                   </div>
                                 ))}
                               </div>
                             )}
                             <form onSubmit={(e) => { e.preventDefault(); handleAddIdeaComment(idea.id); }} className="flex gap-1.5">
-                              <input type="text" value={newIdeaCommentMap[idea.id] || ''} onChange={(e) => setNewIdeaCommentMap({ ...newIdeaCommentMap, [idea.id]: e.target.value })} placeholder="Add a comment..." className="flex-1 min-w-0 text-[11px] px-2 py-1.5 rounded-lg border border-black/10 bg-white/90 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
+                              <MentionInput value={newIdeaCommentMap[idea.id] || ''} onChange={(v) => setNewIdeaCommentMap({ ...newIdeaCommentMap, [idea.id]: v })} names={mentionNames} placeholder="Add a comment... (@ to mention)" className="text-[11px] px-2 py-1.5 rounded-lg border border-black/10 bg-white/90 focus:outline-none focus:ring-1 focus:ring-indigo-400" />
                               <button type="submit" className="px-2 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white transition"><Send className="w-3 h-3" /></button>
                             </form>
                           </div>
@@ -2167,21 +2318,21 @@ export default function App() {
                   <div key={pc.id} className="bg-slate-50 p-2.5 rounded-lg border border-slate-100 text-xs">
                     <div className="flex justify-between items-center mb-0.5">
                       <span className="font-bold text-indigo-900">{pc.studentName === currentStudent.name ? `${pc.studentName} (you)` : pc.studentName}</span>
-                      <span className="text-[10px] text-slate-400">{pc.time}</span>
+                      <span className="text-[10px] text-slate-400">{pc.time}{pc.edited && ' • edited'}<ActionBtns canEdit={pc.studentId === currentStudentId} canDelete={pc.studentId === currentStudentId} onEdit={() => setEditing('pc:' + pc.id)} onDelete={() => handleDeleteQuestion(pc)} /></span>
                     </div>
-                    <p className="text-slate-700">{pc.text}</p>
-                    {pc.teacherReply && <div className="mt-2 pl-3 border-l-2 border-emerald-500 text-[11px] text-emerald-900 font-medium"><span className="font-bold text-emerald-700">Teacher: </span>{pc.teacherReply}</div>}
+                    {editing === 'pc:' + pc.id ? <InlineEdit initial={pc.text} names={mentionNames} onSave={(v) => handleEditQuestion(pc, v)} onCancel={() => setEditing(null)} /> : <p className="text-slate-700"><MentionText text={pc.text} names={mentionNames} /></p>}
+                    {pc.teacherReply && <div className="mt-2 pl-3 border-l-2 border-emerald-500 text-[11px] text-emerald-900 font-medium"><span className="font-bold text-emerald-700">Teacher: </span><MentionText text={pc.teacherReply} names={mentionNames} />{pc.teacherReplyEdited && <span className="text-[9px] text-slate-400"> (edited)</span>}</div>}
                     {(pc.studentReplies || []).length > 0 && (
                       <div className="mt-2 space-y-1.5">
                         {pc.studentReplies.map(sr => (
                           <div key={sr.id} className="pl-3 border-l-2 border-indigo-300 text-[11px] text-slate-700">
-                            <span className="font-bold text-indigo-700">{sr.studentId === currentStudentId ? `${sr.studentName} (you)` : sr.studentName}: </span>{sr.text}
+                            <span className="font-bold text-indigo-700">{sr.studentId === currentStudentId ? `${sr.studentName} (you)` : sr.studentName}: </span>{editing === 'sr:' + sr.id ? <InlineEdit initial={sr.text} names={mentionNames} onSave={(v) => handleEditStudentReply(pc, sr.id, v)} onCancel={() => setEditing(null)} /> : <MentionText text={sr.text} names={mentionNames} />}{sr.edited && <span className="text-[9px] text-slate-400"> (edited)</span>}<ActionBtns canEdit={sr.studentId === currentStudentId} canDelete={sr.studentId === currentStudentId} onEdit={() => setEditing('sr:' + sr.id)} onDelete={() => handleDeleteStudentReply(pc, sr)} />
                           </div>
                         ))}
                       </div>
                     )}
                     <div className="mt-2 flex gap-1.5">
-                      <input type="text" placeholder="Reply to this classmate..." value={newStudentReplyMap[pc.id] || ''} onChange={(e) => setNewStudentReplyMap({ ...newStudentReplyMap, [pc.id]: e.target.value })} className="flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                      <MentionInput placeholder="Reply... (@ to mention)" value={newStudentReplyMap[pc.id] || ''} onChange={(v) => setNewStudentReplyMap({ ...newStudentReplyMap, [pc.id]: v })} names={mentionNames} onEnter={() => handleStudentReplyToComment(pc.id)} className="text-[11px] px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-indigo-500" />
                       <button type="button" onClick={() => handleStudentReplyToComment(pc.id)} className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 text-[11px] font-semibold px-2.5 py-1 rounded transition">Reply</button>
                     </div>
                   </div>
@@ -2189,7 +2340,7 @@ export default function App() {
                 {visibleProblemComments.length === 0 && <p className="text-[11px] text-slate-400 italic text-center py-3">No questions yet. Ask your teacher anything!</p>}
               </div>
               <form onSubmit={handleSendProblemComment} className="flex gap-2">
-                <input type="text" placeholder="Ask the teacher..." value={newProbCommentText} onChange={(e) => setNewProbCommentText(e.target.value)} disabled={!activeProblem} className="flex-1 text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-50" />
+                <MentionInput placeholder="Ask the teacher... (@ to mention)" value={newProbCommentText} onChange={setNewProbCommentText} names={mentionNames} disabled={!activeProblem} className="text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 disabled:bg-slate-50" />
                 <button type="submit" disabled={!activeProblem} className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-2 rounded-lg text-xs font-medium transition disabled:opacity-60">Post</button>
               </form>
             </div>
@@ -2887,8 +3038,9 @@ export default function App() {
                                                   </select>
                                                 </div>
                                               </div>
-                                              <div className="flex gap-1">
-                                                <input type="text" placeholder="Feedback reply..." value={replyTextMap[idea.id] || ''} onChange={(e) => setReplyTextMap({ ...replyTextMap, [idea.id]: e.target.value })} className="flex-1 text-[11px] px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none" />
+                                              {idea.teacherReply && (editing === 'ti:' + idea.id ? <InlineEdit initial={idea.teacherReply} names={mentionNames} onSave={(v) => handleEditTeacherReply('ideas', idea.id, v)} onCancel={() => setEditing(null)} /> : <div className="p-1.5 bg-emerald-50 border border-emerald-200 rounded text-[11px] text-slate-700"><span className="font-bold text-emerald-700">Your feedback: </span><MentionText text={idea.teacherReply} names={mentionNames} />{idea.teacherReplyEdited && <span className="text-[9px] text-slate-400"> (edited)</span>}<ActionBtns canEdit canDelete onEdit={() => setEditing('ti:' + idea.id)} onDelete={() => handleDeleteTeacherReply('ideas', idea.id)} /></div>)}
+<div className="flex gap-1">
+                                                <MentionInput placeholder="Feedback reply... (@ to mention)" value={replyTextMap[idea.id] || ''} onChange={(v) => setReplyTextMap({ ...replyTextMap, [idea.id]: v })} names={mentionNames} onEnter={() => handleReplyToIdea(idea.id)} className="text-[11px] px-2 py-1 border border-slate-200 rounded bg-white focus:outline-none" />
                                                 <button onClick={() => handleReplyToIdea(idea.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] px-2 py-1 rounded transition">Reply</button>
                                               </div>
                                             </div>
@@ -2914,17 +3066,17 @@ export default function App() {
                             <div key={pc.id} className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-100 text-xs">
                               <div className="flex justify-between items-center mb-1">
                                 <span className="font-bold text-indigo-950">{pc.studentName}</span>
-                                <span className="text-[10px] text-slate-400">{pc.time}</span>
+                                <span className="text-[10px] text-slate-400">{pc.time}{pc.edited && ' • edited'}<ActionBtns canDelete onDelete={() => handleDeleteQuestion(pc)} /></span>
                               </div>
-                              <p className="text-slate-700 mb-2">{pc.text}</p>
-                              {pc.teacherReply && <div className="mb-2 p-1.5 bg-white border border-indigo-200 rounded text-[11px]"><span className="font-bold text-emerald-700">Replied: </span><span className="text-slate-700">{pc.teacherReply}</span></div>}
+                              <p className="text-slate-700 mb-2"><MentionText text={pc.text} names={mentionNames} /></p>
+                              {pc.teacherReply && (editing === 'tr:' + pc.id ? <InlineEdit initial={pc.teacherReply} names={mentionNames} onSave={(v) => handleEditTeacherReply('problemComments', pc.id, v)} onCancel={() => setEditing(null)} /> : <div className="mb-2 p-1.5 bg-white border border-indigo-200 rounded text-[11px]"><span className="font-bold text-emerald-700">Replied: </span><span className="text-slate-700"><MentionText text={pc.teacherReply} names={mentionNames} /></span>{pc.teacherReplyEdited && <span className="text-[9px] text-slate-400"> (edited)</span>}<ActionBtns canEdit canDelete onEdit={() => setEditing('tr:' + pc.id)} onDelete={() => handleDeleteTeacherReply('problemComments', pc.id)} /></div>)}
                               {(pc.studentReplies || []).length > 0 && (
                                 <div className="mb-2 space-y-1">
-                                  {pc.studentReplies.map(sr => (<div key={sr.id} className="pl-2 border-l-2 border-indigo-300 text-[11px] text-slate-700"><span className="font-bold text-indigo-700">{sr.studentName}: </span>{sr.text}</div>))}
+                                  {pc.studentReplies.map(sr => (<div key={sr.id} className="pl-2 border-l-2 border-indigo-300 text-[11px] text-slate-700"><span className="font-bold text-indigo-700">{sr.studentName}: </span><MentionText text={sr.text} names={mentionNames} />{sr.edited && <span className="text-[9px] text-slate-400"> (edited)</span>}<ActionBtns canDelete onDelete={() => handleDeleteStudentReply(pc, sr)} /></div>))}
                                 </div>
                               )}
                               <div className="flex gap-1">
-                                <input type="text" placeholder="Reply to student..." value={replyTextMap[pc.id] || ''} onChange={(e) => setReplyTextMap({ ...replyTextMap, [pc.id]: e.target.value })} className="flex-1 text-[11px] px-2 py-1 border border-indigo-200 rounded bg-white focus:outline-none" />
+                                <MentionInput placeholder="Reply to student... (@ to mention)" value={replyTextMap[pc.id] || ''} onChange={(v) => setReplyTextMap({ ...replyTextMap, [pc.id]: v })} names={mentionNames} onEnter={() => handleReplyToComment(pc.id)} className="text-[11px] px-2 py-1 border border-indigo-200 rounded bg-white focus:outline-none" />
                                 <button onClick={() => handleReplyToComment(pc.id)} className="bg-indigo-600 hover:bg-indigo-700 text-white text-[11px] px-2 py-1 rounded transition">Reply</button>
                               </div>
                             </div>
