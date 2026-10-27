@@ -13,8 +13,16 @@ import Login from './Login.jsx';
 
 // 🔥 FIREBASE IMPORTS
 import { auth } from './firebase';
-import { signOut } from 'firebase/auth';
+import { signOut, onAuthStateChanged } from 'firebase/auth';
 import { subscribeCollection, addItem, updateItem, deleteItem, setItem } from './services/db';
+
+// ✅ Refresh-persistence helpers (session + current page restore)
+const LS_USER = 'cb_user';
+const LS_UI = 'cb_ui';
+const lsGet = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
+const lsSet = (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch { /* ignore */ } };
+const lsDel = (key) => { try { localStorage.removeItem(key); } catch { /* ignore */ } };
+const savedUI = () => lsGet(LS_UI) || {};
 
 // ✅ Text similarity helper
 const textSimilarity = (a, b) => {
@@ -147,8 +155,10 @@ const ActionBtns = ({ canEdit, canDelete, onEdit, onDelete }) => (
 );
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [role, setRole] = useState('student');
+  const [currentUser, setCurrentUser] = useState(() => lsGet(LS_USER));
+  const [role, setRole] = useState(() => lsGet(LS_USER)?.role || 'student');
+  // Firebase ko saved session restore karne ka time do (refresh par login page na dikhe)
+  const [authReady, setAuthReady] = useState(false);
   const [currentStudentId, setCurrentStudentId] = useState('');
   const [studentCheckDone, setStudentCheckDone] = useState(false);
 
@@ -156,7 +166,7 @@ export default function App() {
   const [students, setStudents] = useState([]);
   const [groups, setGroups] = useState([]);
   const [problems, setProblems] = useState([]);
-  const [selectedProblemId, setSelectedProblemId] = useState('');
+  const [selectedProblemId, setSelectedProblemId] = useState(() => savedUI().selectedProblemId || '');
   const [announcements, setAnnouncements] = useState([]);
   const [ideas, setIdeas] = useState([]);
   const [notifications, setNotifications] = useState([]);
@@ -188,10 +198,10 @@ export default function App() {
   // 🆕 Share problem with all teachers (view only)
   const [teacherProblemShared, setTeacherProblemShared] = useState(false);
   const [showTeacherModal, setShowTeacherModal] = useState(false);
-  const [teacherTab, setTeacherTab] = useState('dashboard');
+  const [teacherTab, setTeacherTab] = useState(() => savedUI().teacherTab || 'dashboard');
 
   // ✅ Queries tab: selected problem for detail view
-  const [queryProblemId, setQueryProblemId] = useState('');
+  const [queryProblemId, setQueryProblemId] = useState(() => savedUI().queryProblemId || '');
 
   const [newAnnouncementText, setNewAnnouncementText] = useState('');
   const [newAnnouncementTitle, setNewAnnouncementTitle] = useState('');
@@ -234,21 +244,57 @@ export default function App() {
   const handleLogin = (user) => {
     let name = user.name;
     if (user.role === 'student' && (!name || name === 'Student User')) name = 'Student';
-    setCurrentUser({ ...user, name });
+    const fullUser = { ...user, name };
+    setCurrentUser(fullUser);
     setRole(user.role);
     setStudentCheckDone(false);
+    lsSet(LS_USER, fullUser);
   };
 
   const handleLogout = async () => {
+    lsDel(LS_USER);
+    lsDel(LS_UI);
     await signOut(auth);
     setCurrentUser(null);
+    setSelectedProblemId('');
+    setTeacherTab('dashboard');
+    setQueryProblemId('');
     setCurrentStudentId('');
     setStudentCheckDone(false);
   };
 
-  // 🔥 LISTEN TO FIREBASE DATA (REAL-TIME)
+  // 🔐 Refresh par login session restore karo
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (fbUser) => {
+      if (!fbUser) {
+        // Firebase mein session nahi hai -> logout
+        lsDel(LS_USER);
+        setCurrentUser(null);
+      } else {
+        const saved = lsGet(LS_USER);
+        if (saved && saved.uid === fbUser.uid) {
+          setCurrentUser(prev => prev || saved);
+          setRole(saved.role);
+        } else if (saved) {
+          // Kisi aur account ka purana data -> clear
+          lsDel(LS_USER);
+          setCurrentUser(null);
+        }
+      }
+      setAuthReady(true);
+    });
+    return () => unsub();
+  }, []);
+
+  // 💾 Current page / tab save karo taake refresh par wahi page khule
   useEffect(() => {
     if (!currentUser) return;
+    lsSet(LS_UI, { teacherTab, selectedProblemId, queryProblemId });
+  }, [currentUser, teacherTab, selectedProblemId, queryProblemId]);
+
+  // 🔥 LISTEN TO FIREBASE DATA (REAL-TIME)
+  useEffect(() => {
+    if (!currentUser || !authReady) return;
     const unsubs = [
       subscribeCollection('students', setStudents),
       subscribeCollection('groups', setGroups),
@@ -261,7 +307,7 @@ export default function App() {
       subscribeCollection('developments', setDevelopments),
     ];
     return () => unsubs.forEach(unsub => unsub());
-  }, [currentUser]);
+  }, [currentUser, authReady]);
 
   // 🔥 MATCH LOGGED-IN STUDENT
   useEffect(() => {
@@ -1895,6 +1941,13 @@ export default function App() {
     showPopup('⬇️ Full Export Complete', `Downloaded "${filename}" with ${workbook.SheetNames.length} sheets.`, 'info');
   };
 
+  if (!authReady) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 text-slate-500 text-sm font-medium">
+        Loading…
+      </div>
+    );
+  }
   if (!currentUser) return <Login onLogin={handleLogin} />;
 
   const displayedIdeas = ideas.filter(i => {
@@ -3241,6 +3294,7 @@ export default function App() {
             <div className="mt-5 pt-3 border-t border-slate-200 flex justify-end">
               <button onClick={() => setShowAISummary(false)} className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-xl text-xs font-semibold transition">Close</button>
             </div>
+            
           </div>
         </div>
       )}
