@@ -4,7 +4,7 @@ import {
   Send, Shield, Lock, Globe,
   Calendar, Megaphone, CornerDownRight, Bell, Clock, Edit3, Activity, FileText, LogOut,
   Sparkles, AlertTriangle, Download, X, CheckCircle2, UserCheck, HelpCircle, Eye, UserPlus,
-  Flame, Trophy, Award, Star, TrendingUp, EyeOff, Rocket, Layers, Search, Link2, ArrowLeft
+  Flame, Trophy, Award, Star, TrendingUp, EyeOff, Rocket, Layers, Search, Link2, ArrowLeft, Menu
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import html2canvas from 'html2canvas';
@@ -171,6 +171,8 @@ export default function App() {
   const [ideas, setIdeas] = useState([]);
   const [notifications, setNotifications] = useState([]);
   const [showNotifDropdown, setShowNotifDropdown] = useState(false);
+  // 📱 Mobile sidebar drawer
+  const [showSidebar, setShowSidebar] = useState(false);
   const [selectedStudentForAnalytics, setSelectedStudentForAnalytics] = useState(null);
   const [viewFilter, setViewFilter] = useState('all');
 
@@ -2020,9 +2022,13 @@ export default function App() {
         ))}
       </div>
 
+      {/* 📱 Sidebar overlay (mobile only) */}
+      {showSidebar && <div className="fixed inset-0 bg-slate-900/50 z-[55] lg:hidden" onClick={() => setShowSidebar(false)} />}
+
       {/* Header */}
       <header className="bg-slate-900 text-white border-b border-slate-800 px-3 sm:px-6 py-3 flex items-center justify-between gap-2 shadow-md sticky top-0 z-50">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button onClick={() => setShowSidebar(true)} className="lg:hidden p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg border border-slate-700 transition flex-shrink-0" title="Menu"><Menu className="w-5 h-5" /></button>
           <div>
             <h1 className="font-extrabold text-base sm:text-lg leading-tight tracking-tight">Class<span className="text-orange-500">Brainstorm</span></h1>
             <p className="hidden sm:block text-xs text-slate-400">Share ideas together</p>
@@ -2088,7 +2094,11 @@ export default function App() {
       {/* STUDENT VIEW */}
       {role === 'student' && currentStudent && (
         <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-4 sm:gap-6">
-          <aside className="col-span-12 lg:col-span-4 min-w-0 flex flex-col gap-4 sm:gap-5">
+          <aside className={`fixed inset-y-0 left-0 z-[60] w-[88%] max-w-sm overflow-y-auto overscroll-contain bg-slate-100 p-3 shadow-2xl transition-transform duration-300 ease-out ${showSidebar ? 'translate-x-0' : '-translate-x-full'} lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:overflow-visible lg:bg-transparent lg:p-0 lg:shadow-none lg:col-span-4 col-span-12 min-w-0 flex flex-col gap-4 sm:gap-5`}>
+            <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-300">
+              <span className="font-extrabold text-sm text-slate-800">Class<span className="text-orange-500">Brainstorm</span> <span className="text-slate-400 font-semibold text-xs">• Menu</span></span>
+              <button onClick={() => setShowSidebar(false)} className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-red-600" title="Close"><X className="w-4 h-4" /></button>
+            </div>
             {/* Top Thinkers */}
             <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-slate-900 text-slate-900 rounded-2xl p-4 border border-amber-300 shadow-sm">
               <div className="flex items-center justify-between pb-2 border-b border-amber-200 mb-3">
@@ -2427,7 +2437,11 @@ export default function App() {
       {/* TEACHER VIEW */}
       {role === 'teacher' && (
         <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-4 sm:gap-6">
-          <aside className="col-span-12 lg:col-span-4 min-w-0 flex flex-col gap-4 sm:gap-5">
+          <aside className={`fixed inset-y-0 left-0 z-[60] w-[88%] max-w-sm overflow-y-auto overscroll-contain bg-slate-100 p-3 shadow-2xl transition-transform duration-300 ease-out ${showSidebar ? 'translate-x-0' : '-translate-x-full'} lg:static lg:z-auto lg:w-auto lg:max-w-none lg:translate-x-0 lg:overflow-visible lg:bg-transparent lg:p-0 lg:shadow-none lg:col-span-4 col-span-12 min-w-0 flex flex-col gap-4 sm:gap-5`}>
+            <div className="lg:hidden flex items-center justify-between pb-2 border-b border-slate-300">
+              <span className="font-extrabold text-sm text-slate-800">Class<span className="text-orange-500">Brainstorm</span> <span className="text-slate-400 font-semibold text-xs">• Menu</span></span>
+              <button onClick={() => setShowSidebar(false)} className="p-1.5 rounded-lg bg-white border border-slate-200 text-slate-600 hover:text-red-600" title="Close"><X className="w-4 h-4" /></button>
+            </div>
             <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl shadow-md">
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-2"><Activity className="w-4 h-4 text-emerald-400" /> Live Group Contribution Metrics</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -2488,7 +2502,7 @@ export default function App() {
                   const owner = isProblemOwner(prob);
                   const shared = prob.sharedWithTeachers === true;
                   return (
-                    <div key={prob.id} onClick={() => setSelectedProblemId(prob.id)} className={`p-4 rounded-xl border transition cursor-pointer relative ${selectedProblemId === prob.id ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
+                    <div key={prob.id} onClick={() => { setSelectedProblemId(prob.id); setShowSidebar(false); }} className={`p-4 rounded-xl border transition cursor-pointer relative ${selectedProblemId === prob.id ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
                       <div className="flex justify-between items-start mb-1 pr-12">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <h3 className="font-bold text-slate-800 text-sm">{prob.title}</h3>
