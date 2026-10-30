@@ -2500,14 +2500,12 @@ export default function App() {
                   const clusterCount = (clusteredIdeasByProblem[prob.id] || []).length;
                   const similarCount = (clusteredIdeasByProblem[prob.id] || []).filter(c => c.items.length >= 2).length;
                   const owner = isProblemOwner(prob);
-                  const shared = prob.sharedWithTeachers === true;
                   return (
                     <div key={prob.id} onClick={() => { setSelectedProblemId(prob.id); setShowSidebar(false); }} className={`p-4 rounded-xl border transition cursor-pointer relative ${selectedProblemId === prob.id ? 'bg-emerald-50/50 border-emerald-500 ring-1 ring-emerald-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}>
                       <div className="flex justify-between items-start mb-1 pr-12">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <h3 className="font-bold text-slate-800 text-sm">{prob.title}</h3>
                           {!owner && <span className="text-[9px] font-bold bg-slate-200 text-slate-700 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Eye className="w-2.5 h-2.5" /> View only</span>}
-                          {shared && <span className="text-[9px] font-bold bg-cyan-100 text-cyan-800 border border-cyan-300 px-1.5 py-0.5 rounded-full flex items-center gap-0.5"><Globe className="w-2.5 h-2.5" /> Shared</span>}
                         </div>
                         <span className="text-[10px] text-slate-400">{prob.createdTime}</span>
                       </div>
@@ -2532,9 +2530,6 @@ export default function App() {
                             <div className="flex items-center gap-1 flex-wrap">
                               <button onClick={() => handleToggleStudentsVisibility(prob.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border transition ${probStudentsCanSee ? 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100' : 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'}`} title={probStudentsCanSee ? 'Hide' : 'Show'}>
                                 {probStudentsCanSee ? <><Lock className="w-3 h-3" /> Hide</> : <><Eye className="w-3 h-3" /> Show</>}
-                              </button>
-                              <button onClick={() => handleToggleProblemShare(prob.id)} className={`flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border transition ${shared ? 'bg-cyan-50 text-cyan-800 border-cyan-300 hover:bg-cyan-100' : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'}`} title={shared ? 'Stop sharing' : 'Share with all teachers'}>
-                                <Globe className="w-3 h-3" /> {shared ? 'Unshare' : 'Share'}
                               </button>
                             </div>
                           </>
@@ -3205,15 +3200,6 @@ export default function App() {
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input type="checkbox" checked={teacherProblemPeerVisible} onChange={(e) => setTeacherProblemPeerVisible(e.target.checked)} className="mt-0.5 w-4 h-4 accent-emerald-600" />
                   <div><p className="text-xs font-bold text-slate-800">👁️ Students can see each other</p><p className="text-[11px] text-slate-500 mt-0.5">Uncheck for graded work.</p></div>
-                </label>
-              </div>
-              <div className="p-3 rounded-lg border-2 border-cyan-200 bg-cyan-50">
-                <label className="flex items-start gap-3 cursor-pointer">
-                  <input type="checkbox" checked={teacherProblemShared} onChange={(e) => setTeacherProblemShared(e.target.checked)} className="mt-0.5 w-4 h-4 accent-cyan-600" />
-                  <div>
-                    <p className="text-xs font-bold text-cyan-900 flex items-center gap-1"><Globe className="w-3.5 h-3.5" /> Share with all teachers (view only)</p>
-                    <p className="text-[11px] text-cyan-800 mt-0.5">Other teachers will see this problem and its ideas, but only <b>you</b> can edit, rate, give feedback, or assign tasks.</p>
-                  </div>
                 </label>
               </div>
               <div className="flex justify-end gap-2 pt-2">
