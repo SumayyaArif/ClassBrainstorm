@@ -148,9 +148,9 @@ const InlineEdit = ({ initial, names, onSave, onCancel }) => {
 };
 
 const ActionBtns = ({ canEdit, canDelete, onEdit, onDelete }) => (
-  <span className="inline-flex items-center gap-1 ml-1.5 align-middle">
-    {canEdit && <button type="button" onClick={onEdit} title="Edit" className="text-slate-400 hover:text-indigo-600 transition"><Edit3 className="w-3 h-3" /></button>}
-    {canDelete && <button type="button" onClick={onDelete} title="Delete" className="text-slate-400 hover:text-red-600 transition"><Trash2 className="w-3 h-3" /></button>}
+  <span className="inline-flex items-center gap-0.5 ml-1.5 align-middle">
+    {canEdit && <button type="button" onClick={onEdit} title="Edit" className="p-1 rounded text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 transition"><Edit3 className="w-3.5 h-3.5" /></button>}
+    {canDelete && <button type="button" onClick={onDelete} title="Delete" className="p-1 rounded text-slate-500 hover:text-red-600 hover:bg-red-50 transition"><Trash2 className="w-3.5 h-3.5" /></button>}
   </span>
 );
 
@@ -1056,6 +1056,24 @@ export default function App() {
   const handleDeleteTeacherReply = async (col, id) => {
     if (!confirmDelete('reply')) return;
     await updateItem(col, id, { teacherReply: '', teacherReplyEdited: false });
+  };
+
+  // ✅ Student apni post (idea) delete kar sakta hai
+  const handleDeleteIdea = async (idea) => {
+    if (!idea || idea.studentId !== currentStudentId) return;
+    if (!confirmDelete('post (its comments will be removed too)')) return;
+    try {
+      await deleteItem('ideas', idea.id);
+      const linkedDevs = developments.filter(d => d.ideaId === idea.id);
+      for (const d of linkedDevs) { await deleteItem('developments', d.id); }
+      const st = students.find(x => x.id === idea.studentId);
+      if (st) await updateItem('students', st.id, { ideasCount: Math.max(0, (st.ideasCount || 0) - 1) });
+      if (openIdeaCommentsId === idea.id) setOpenIdeaCommentsId(null);
+      showPopup('🗑️ Post Deleted', 'Your post has been removed.', 'info');
+    } catch (err) {
+      console.error('Delete idea failed:', err);
+      showPopup('⚠️ Delete Failed', 'Could not delete the post. Please try again.', 'info');
+    }
   };
 
   const handleExportReport = () => {
@@ -1983,7 +2001,9 @@ export default function App() {
   const queryProblem = visibleProblems.find(p => p.id === queryProblemId) || null;
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-100 font-sans">
+    <div className="min-h-screen flex flex-col bg-slate-100 font-sans break-words [overflow-x:clip]">
+      {/* Mobile: iOS input zoom band karo + tap-friendly */}
+      <style>{`@media (max-width: 640px){ input, select, textarea { font-size: 16px !important; } }`}</style>
       {/* Popups */}
       <div className="fixed top-4 right-4 z-[100] flex flex-col gap-2 w-80 max-w-[90vw]">
         {popups.map(p => (
@@ -2001,11 +2021,11 @@ export default function App() {
       </div>
 
       {/* Header */}
-      <header className="bg-slate-900 text-white border-b border-slate-800 px-6 py-3 flex items-center justify-between shadow-md sticky top-0 z-50">
+      <header className="bg-slate-900 text-white border-b border-slate-800 px-3 sm:px-6 py-3 flex items-center justify-between gap-2 shadow-md sticky top-0 z-50">
         <div className="flex items-center gap-3">
           <div>
-            <h1 className="font-extrabold text-lg leading-tight tracking-tight">Class<span className="text-orange-500">Brainstorm</span></h1>
-            <p className="text-xs text-slate-400">Share ideas together</p>
+            <h1 className="font-extrabold text-base sm:text-lg leading-tight tracking-tight">Class<span className="text-orange-500">Brainstorm</span></h1>
+            <p className="hidden sm:block text-xs text-slate-400">Share ideas together</p>
           </div>
         </div>
         <div className="flex items-center gap-3">
@@ -2019,7 +2039,7 @@ export default function App() {
             </span>
           )}
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2 sm:gap-4">
           <div className="relative">
             <button onClick={() => setShowNotifDropdown(!showNotifDropdown)} className="p-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg relative transition">
               <Bell className="w-4 h-4" />
@@ -2028,7 +2048,7 @@ export default function App() {
               )}
             </button>
             {showNotifDropdown && (
-              <div className="absolute right-0 mt-2 w-80 bg-white text-slate-800 rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
+              <div className="fixed left-2 right-2 top-14 sm:absolute sm:left-auto sm:right-0 sm:top-auto sm:mt-2 sm:w-80 bg-white text-slate-800 rounded-xl shadow-xl border border-slate-200 z-50 overflow-hidden">
                 <div className="p-3 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
                   <span className="font-bold text-xs">Notifications</span>
                   <span className="text-[10px] text-slate-400">{visibleNotifications.length} relevant</span>
@@ -2046,8 +2066,8 @@ export default function App() {
               </div>
             )}
           </div>
-          <div className="text-xs font-medium text-slate-300 bg-slate-800 border border-slate-700 px-3 py-1.5 rounded-xl flex items-center gap-2">
-            <span>{role === 'student' ? `${currentStudent?.name || currentUser?.name} (you)` : (currentUser?.name || 'Teacher')}</span>
+          <div className="text-xs font-medium text-slate-300 bg-slate-800 border border-slate-700 px-2 sm:px-3 py-1.5 rounded-xl flex items-center gap-2 min-w-0 max-w-[120px] sm:max-w-none">
+            <span className="truncate">{role === 'student' ? `${currentStudent?.name || currentUser?.name} (you)` : (currentUser?.name || 'Teacher')}</span>
             {role === 'student' && currentStudent && (currentStudent.streak || 0) > 0 && (
               <span className="flex items-center text-amber-400 font-bold text-[11px] bg-amber-950/60 px-1.5 py-0.5 rounded border border-amber-800"><Flame className="w-3 h-3 fill-amber-500 mr-0.5" /> {currentStudent.streak}d</span>
             )}
@@ -2058,17 +2078,17 @@ export default function App() {
 
       {/* Announcement Bar */}
       {announcements.length > 0 && (
-        <div className="bg-indigo-900 text-indigo-100 px-6 py-2 border-b border-indigo-800 flex items-center gap-3 text-xs">
+        <div className="bg-indigo-900 text-indigo-100 px-3 sm:px-6 py-2 border-b border-indigo-800 flex items-center gap-3 text-xs">
           <Megaphone className="w-4 h-4 text-indigo-300 flex-shrink-0" />
-          <div className="flex-1 overflow-hidden"><span className="font-bold mr-2 text-indigo-200">[{announcements[0].title}]:</span><span>{announcements[0].content}</span></div>
-          <span className="text-[10px] text-indigo-300">{announcements[0].time}</span>
+          <div className="flex-1 min-w-0 break-words"><span className="font-bold mr-2 text-indigo-200">[{announcements[0].title}]:</span><span>{announcements[0].content}</span></div>
+          <span className="hidden sm:inline text-[10px] text-indigo-300">{announcements[0].time}</span>
         </div>
       )}
 
       {/* STUDENT VIEW */}
       {role === 'student' && currentStudent && (
-        <main className="flex-1 p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-6">
-          <aside className="col-span-12 lg:col-span-4 flex flex-col gap-5">
+        <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-4 sm:gap-6">
+          <aside className="col-span-12 lg:col-span-4 min-w-0 flex flex-col gap-4 sm:gap-5">
             {/* Top Thinkers */}
             <div className="bg-gradient-to-br from-amber-500/10 via-orange-500/5 to-slate-900 text-slate-900 rounded-2xl p-4 border border-amber-300 shadow-sm">
               <div className="flex items-center justify-between pb-2 border-b border-amber-200 mb-3">
@@ -2108,7 +2128,7 @@ export default function App() {
               });
               if (myDevs.length === 0) return null;
               return (
-                <div className="bg-white rounded-2xl p-5 border-2 border-indigo-300 shadow-md">
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border-2 border-indigo-300 shadow-md">
                   <div className="flex items-center justify-between pb-3 border-b border-indigo-100 mb-3">
                     <div className="flex items-center gap-2"><Rocket className="w-4 h-4 text-indigo-600" /><h2 className="font-bold text-slate-800 text-sm">My Assigned Tasks</h2></div>
                     <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full border border-indigo-200">{myDevs.length} active</span>
@@ -2139,7 +2159,7 @@ export default function App() {
             })()}
 
             {/* Groups Management */}
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-4">
                 <div className="flex items-center gap-2"><Users className="w-4 h-4 text-indigo-600" /><h2 className="font-bold text-slate-800 text-sm">All Class Groups ({groups.length})</h2></div>
                 <span className="text-[11px] font-semibold text-indigo-600 bg-indigo-50 px-2.5 py-0.5 rounded-full">All Student Control</span>
@@ -2180,7 +2200,7 @@ export default function App() {
             </div>
 
             {/* Private Chat */}
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex-1 flex flex-col min-h-[260px]">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex-1 flex flex-col min-h-[260px]">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
                 <div className="flex items-center gap-2"><MessageSquare className="w-4 h-4 text-emerald-600" /><h2 className="font-bold text-slate-800 text-sm">Private Group Chat</h2></div>
                 <span className="flex items-center gap-1 text-[10px] font-semibold text-slate-400 bg-slate-100 px-2 py-0.5 rounded"><Lock className="w-3 h-3 text-slate-500" /> Hidden from Teacher</span>
@@ -2209,11 +2229,11 @@ export default function App() {
             </div>
           </aside>
 
-          <section className="col-span-12 lg:col-span-8 flex flex-col gap-5">
+          <section className="col-span-12 lg:col-span-8 min-w-0 flex flex-col gap-4 sm:gap-5">
             {/* Active Problem */}
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-              <div className="flex justify-between items-start gap-4 mb-2">
-                <div>
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-3 sm:gap-4 mb-2">
+                <div className="min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
                     <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded inline-block">Active Question</span>
                     <span className="text-[10px] font-bold text-red-600 bg-red-50 border border-red-100 px-2.5 py-0.5 rounded-full flex items-center gap-1"><Clock className="w-3 h-3" /> Time Remaining: {timeLeft}</span>
@@ -2223,7 +2243,7 @@ export default function App() {
                   <p className="text-xs text-slate-500 mt-1">{activeProblem?.description || 'Your teacher has not posted a problem yet.'}</p>
                 </div>
                 {visibleProblems.length > 0 && (
-                  <select value={selectedProblemId} onChange={(e) => setSelectedProblemId(e.target.value)} className="bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                  <select value={selectedProblemId} onChange={(e) => setSelectedProblemId(e.target.value)} className="w-full sm:w-auto sm:max-w-[260px] bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 text-xs font-medium text-slate-700 focus:outline-none focus:ring-1 focus:ring-indigo-500">
                     {visibleProblems.map(p => <option key={p.id} value={p.id}>Task: {p.title.substring(0, 30)}...</option>)}
                   </select>
                 )}
@@ -2236,24 +2256,24 @@ export default function App() {
               )}
               {activeProblem && (
                 <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-3 items-center">
-                  <input type="text" placeholder="Write your idea..." value={newIdeaContent} onChange={(e) => setNewIdeaContent(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddIdea(); } }} className="flex-1 min-w-[240px] text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" />
-                  <select value={newIdeaColor} onChange={(e) => setNewIdeaColor(e.target.value)} className="text-xs border border-slate-200 rounded-lg px-2 py-2 bg-slate-50 text-slate-700">
+                  <input type="text" placeholder="Write your idea..." value={newIdeaContent} onChange={(e) => setNewIdeaContent(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddIdea(); } }} className="w-full sm:w-auto sm:flex-1 sm:min-w-[240px] text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                  <select value={newIdeaColor} onChange={(e) => setNewIdeaColor(e.target.value)} className="flex-1 sm:flex-none min-w-0 text-xs border border-slate-200 rounded-lg px-2 py-2 bg-slate-50 text-slate-700">
                     <option value="bg-yellow-200 border-yellow-400 text-yellow-900">🟨 Yellow</option>
                     <option value="bg-green-200 border-green-400 text-green-900">🟩 Green</option>
                     <option value="bg-blue-200 border-blue-400 text-blue-900">🟦 Blue</option>
                     <option value="bg-purple-200 border-purple-400 text-purple-900">🟪 Purple</option>
                   </select>
-                  <select value={newIdeaVisibility} onChange={(e) => setNewIdeaVisibility(e.target.value)} className={`text-xs border rounded-lg px-2 py-2 focus:outline-none focus:ring-1 ${newIdeaVisibility === 'teacher' ? 'bg-purple-50 border-purple-300 text-purple-800 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
+                  <select value={newIdeaVisibility} onChange={(e) => setNewIdeaVisibility(e.target.value)} className={`flex-1 sm:flex-none min-w-0 text-xs border rounded-lg px-2 py-2 focus:outline-none focus:ring-1 ${newIdeaVisibility === 'teacher' ? 'bg-purple-50 border-purple-300 text-purple-800 font-bold' : 'bg-slate-50 border-slate-200 text-slate-700'}`}>
                     <option value="class">🌐 Everyone (Class)</option>
                     <option value="teacher">🔒 Only Teacher</option>
                   </select>
-                  <button type="button" onClick={handleAddIdea} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5"><StickyNote className="w-3.5 h-3.5" /> Post Opinion</button>
+                  <button type="button" onClick={handleAddIdea} className="w-full sm:w-auto justify-center bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-xs font-semibold transition flex items-center gap-1.5"><StickyNote className="w-3.5 h-3.5" /> Post Opinion</button>
                 </div>
               )}
             </div>
 
             {/* Canvas */}
-            <div className="bg-slate-200/80 rounded-2xl p-6 border border-slate-300 shadow-inner min-h-[380px] relative overflow-hidden flex flex-col gap-4">
+            <div className="bg-slate-200/80 rounded-2xl p-3 sm:p-6 border border-slate-300 shadow-inner min-h-[380px] relative overflow-hidden flex flex-col gap-4">
               <div className="flex flex-wrap items-center justify-between gap-2 bg-white/90 backdrop-blur px-4 py-2 rounded-xl border border-slate-200 shadow-sm z-10">
                 <div className="flex items-center gap-2">
                   <Globe className="w-4 h-4 text-indigo-600" />
@@ -2261,7 +2281,7 @@ export default function App() {
                   {!studentsCanSeeEachOther && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1"><Lock className="w-3 h-3" /> Private Mode</span>}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                  <div className="flex flex-wrap items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
                     <button onClick={() => setViewFilter('all')} className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${viewFilter === 'all' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}>🌐 All Students Ideas</button>
                     <button onClick={() => setViewFilter('my-group')} className={`px-2.5 py-1 text-[11px] font-bold rounded-md transition ${viewFilter === 'my-group' ? 'bg-indigo-600 text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'}`}>👥 My Group Only</button>
                   </div>
@@ -2327,6 +2347,9 @@ export default function App() {
                               {isTeacherOnly ? <><Lock className="w-3 h-3" /> Private</> : <><Globe className="w-3 h-3" /> Public</>}
                             </button>
                           )}
+                          {isOwner && (
+                            <button onClick={() => handleDeleteIdea(idea)} title="Delete my post" className="flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded bg-white/60 hover:bg-red-600 hover:text-white text-red-600 transition"><Trash2 className="w-3 h-3" /> Delete</button>
+                          )}
                           <button onClick={() => setOpenIdeaCommentsId(openIdeaCommentsId === idea.id ? null : idea.id)} className="flex items-center gap-1 text-xs font-bold px-2 py-1 rounded bg-white/60 hover:bg-white transition"><MessageSquare className="w-3 h-3" /> {(idea.ideaComments || []).length}</button>
                         </div>
                         {openIdeaCommentsId === idea.id && (
@@ -2361,7 +2384,7 @@ export default function App() {
             </div>
 
             {/* Discussion */}
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
               <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-3">
                 <div className="flex items-center gap-2"><HelpCircle className="w-4 h-4 text-indigo-600" /><h2 className="font-bold text-slate-800 text-sm">Class Discussion</h2></div>
                 {!studentsCanSeeEachOther && <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1"><Lock className="w-3 h-3" /> Only Your Questions Shown</span>}
@@ -2403,9 +2426,9 @@ export default function App() {
 
       {/* TEACHER VIEW */}
       {role === 'teacher' && (
-        <main className="flex-1 p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-6">
-          <aside className="col-span-12 lg:col-span-4 flex flex-col gap-5">
-            <div className="bg-slate-900 text-white p-5 rounded-2xl shadow-md">
+        <main className="flex-1 p-3 sm:p-6 max-w-7xl w-full mx-auto grid grid-cols-12 gap-4 sm:gap-6">
+          <aside className="col-span-12 lg:col-span-4 min-w-0 flex flex-col gap-4 sm:gap-5">
+            <div className="bg-slate-900 text-white p-4 sm:p-5 rounded-2xl shadow-md">
               <h3 className="text-xs font-bold uppercase tracking-wider text-indigo-400 mb-3 flex items-center gap-2"><Activity className="w-4 h-4 text-emerald-400" /> Live Group Contribution Metrics</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {groups.map(g => {
@@ -2455,7 +2478,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
               <h3 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><FileText className="w-4 h-4 text-indigo-600" /> Manage Problems <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full ml-auto">{visibleProblems.length} visible</span></h3>
               <div className="flex flex-col gap-3 max-h-[380px] overflow-y-auto pr-1">
                 {visibleProblems.map(prob => {
@@ -2517,7 +2540,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
               <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2"><Users className="w-4 h-4 text-indigo-600" /> Group Members</h3>
               <div className="space-y-3 max-h-[320px] overflow-y-auto pr-1">
                 {groups.map(g => {
@@ -2546,8 +2569,8 @@ export default function App() {
             </div>
           </aside>
 
-          <section className="col-span-12 lg:col-span-8 flex flex-col gap-5">
-            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
+          <section className="col-span-12 lg:col-span-8 min-w-0 flex flex-col gap-4 sm:gap-5">
+            <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-wrap items-center justify-between gap-4">
               <div>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">Instructor Dashboard</span>
                 <h2 className="text-lg font-bold text-slate-900 mt-1">Hi {currentUser?.name || 'Teacher'} — Class Overview</h2>
@@ -2587,7 +2610,7 @@ export default function App() {
                 <button
                   key={k}
                   onClick={() => { setTeacherTab(k); if (k === 'queries') setQueryProblemId(''); }}
-                  className={`flex-1 min-w-[140px] flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${teacherTab === k ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
+                  className={`flex-1 min-w-[120px] sm:min-w-[140px] flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold transition ${teacherTab === k ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100'}`}
                 ><Icon className="w-4 h-4" /> {l}</button>
               ))}
             </div>
@@ -2595,7 +2618,7 @@ export default function App() {
             {/* DASHBOARD */}
             {teacherTab === 'dashboard' && (
               <>
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
                   <div className="flex items-center justify-between mb-4">
                     <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Rocket className="w-4 h-4 text-indigo-600" /> Task Assignment Board</h3>
                     <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-full">{developments.length} assigned</span>
@@ -2620,7 +2643,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-slate-200/80 rounded-2xl p-6 border border-slate-300 shadow-inner flex flex-col gap-3">
+                <div className="bg-slate-200/80 rounded-2xl p-3 sm:p-6 border border-slate-300 shadow-inner flex flex-col gap-3">
                   <div className="flex flex-wrap items-center justify-between gap-2 bg-white/90 backdrop-blur px-4 py-2 rounded-xl border border-slate-200 shadow-sm">
                     <div className="flex items-center gap-2"><Globe className="w-4 h-4 text-indigo-600" /><span className="text-xs font-bold text-slate-700">Class Canvas ({displayedIdeas.length} ideas)</span></div>
                   </div>
@@ -2656,7 +2679,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-sm">
                   <h3 className="font-bold text-slate-800 text-sm mb-3 flex items-center gap-2"><Megaphone className="w-4 h-4 text-indigo-600" /> Add Announcement</h3>
                   <form onSubmit={handleCreateAnnouncement} className="flex flex-col md:flex-row gap-3">
                     <input type="text" placeholder="Title..." value={newAnnouncementTitle} onChange={(e) => setNewAnnouncementTitle(e.target.value)} className="w-full md:w-1/3 text-xs px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500" />
@@ -2670,7 +2693,7 @@ export default function App() {
             {/* PIPELINE */}
             {teacherTab === 'pipeline' && (
               <>
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
                   <h3 className="font-bold text-slate-800 text-sm mb-1 flex items-center gap-2"><Rocket className="w-4 h-4 text-indigo-600" /> Assigned Tasks Pipeline</h3>
                   <p className="text-[11px] text-slate-500 mb-4">Track each idea from shortlist to implemented.</p>
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
@@ -2709,7 +2732,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
                   <h3 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><Rocket className="w-4 h-4 text-indigo-600" /> All Ideas — Assign Tasks</h3>
                   <div className="space-y-6 max-h-[600px] overflow-y-auto pr-1">
                     {visibleProblems.map((prob, pIdx) => {
@@ -2771,7 +2794,7 @@ export default function App() {
             {/* PERFORMANCE */}
             {teacherTab === 'performance' && (
               <>
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
                   <h3 className="font-bold text-slate-800 text-sm mb-4 flex items-center gap-2"><UserCheck className="w-4 h-4 text-indigo-600" /> Student Activity</h3>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[360px] overflow-y-auto pr-1">
                     {students.map(std => (
@@ -2793,7 +2816,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
                   <h3 className="font-bold text-slate-800 text-sm mb-1 flex items-center gap-2"><TrendingUp className="w-4 h-4 text-indigo-600" /> Participation</h3>
                   <p className="text-[11px] text-slate-500 mb-3">Ideas + comments + upvotes</p>
                   <div className="flex flex-wrap gap-1.5 mb-3">
@@ -2829,7 +2852,7 @@ export default function App() {
             {teacherTab === 'queries' && (
               <>
                 {!queryProblem && (
-                  <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm">
                     <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                       <div>
                         <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2"><Layers className="w-4 h-4 text-purple-600" /> Select a Problem to Review</h3>
@@ -2857,7 +2880,7 @@ export default function App() {
                           return (
                             <button key={prob.id} onClick={() => { setQueryProblemId(prob.id); setClusterSearch(''); setClusterFilter('all'); setExpandedClusters({}); }} className="text-left p-4 rounded-xl border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50/30 transition group">
                               <div className="flex justify-between items-start gap-3 flex-wrap">
-                                <div className="flex-1 min-w-[220px]">
+                                <div className="flex-1 min-w-0 sm:min-w-[220px]">
                                   <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded">Problem {idx + 1}</span>
                                   <h4 className="font-bold text-slate-900 text-sm mt-2 group-hover:text-indigo-700 transition">{prob.title}</h4>
                                   <p className="text-[11px] text-slate-500 mt-0.5 line-clamp-2">{prob.description}</p>
@@ -2975,7 +2998,7 @@ export default function App() {
                         </div>
                       </div>
 
-                      <div className="bg-white rounded-2xl p-5 border-2 border-indigo-200 shadow-sm">
+                      <div className="bg-white rounded-2xl p-4 sm:p-5 border-2 border-indigo-200 shadow-sm">
                         <div className="pb-3 border-b-2 border-indigo-100 mb-4">
                           <div className="flex justify-between items-center mb-2">
                             <span className="text-[10px] font-bold text-slate-500">Review Progress</span>
@@ -3109,7 +3132,7 @@ export default function App() {
                         )}
                       </div>
 
-                      <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col">
+                      <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-sm flex flex-col">
                         <h3 className="font-bold text-slate-800 text-sm pb-3 border-b border-slate-100 mb-3 flex items-center gap-2"><HelpCircle className="w-4 h-4 text-indigo-600" /> Student Questions ({probQuestions.length})</h3>
                         <div className="space-y-3 flex-1 overflow-y-auto max-h-[300px]">
                           {probQuestions.length === 0 && (
@@ -3148,7 +3171,7 @@ export default function App() {
       {/* MODALS */}
       {showTeacherModal && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-xl border border-slate-200">
+          <div className="bg-white rounded-2xl max-w-md w-full p-4 sm:p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <h3 className="text-base font-bold text-slate-900 mb-1">{editingProblem ? 'Edit Problem' : 'New Problem'}</h3>
             <p className="text-xs text-slate-500 mb-4">Add details and a deadline.</p>
             <form onSubmit={handleSaveProblem} className="space-y-4">
@@ -3190,7 +3213,7 @@ export default function App() {
 
       {developIdea && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-4 sm:p-6 shadow-xl border border-slate-200 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2"><Rocket className="w-4 h-4 text-indigo-600" /> Assign Task</h3>
               <button onClick={() => setDevelopIdea(null)} className="text-slate-400 hover:text-slate-600"><X className="w-4 h-4" /></button>
@@ -3240,7 +3263,7 @@ export default function App() {
 
       {showAISummary && aiSummary && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-2xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 max-h-[85vh] overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-2xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 max-h-[85vh] overflow-y-auto">
             <div className="flex items-center justify-between pb-3 border-b border-slate-200 mb-4">
               <div className="flex items-center gap-2 text-purple-700 font-bold text-base"><Sparkles className="w-5 h-5" /> AI Summary</div>
               <button onClick={() => setShowAISummary(false)} className="text-slate-400 hover:text-slate-600"><X className="w-5 h-5" /></button>
